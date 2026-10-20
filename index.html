@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drop2Crop | Precision Irrigation & Fertigation Station</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- MQTT.js CDN -->
+  <script src="https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js"></script>
+  <!-- Google Fonts: Inter & Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            display: ['Outfit', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#ecfdf5',
+              400: '#34d399',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background: radial-gradient(circle at 50% 0%, #0f172a 0%, #020617 100%);
+      color: #f8fafc;
+      min-height: 100vh;
+    }
+    .glass-card {
+      background: rgba(30, 41, 59, 0.65);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.36);
+    }
+    .water-tank {
+      position: relative;
+      width: 110px;
+      height: 170px;
+      border: 4px solid #38bdf8;
+      border-radius: 14px;
+      overflow: hidden;
+      background: rgba(15, 23, 42, 0.6);
+      box-shadow: inset 0 0 15px rgba(56, 189, 248, 0.2);
+    }
+    .water-fill {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+      transition: height 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .water-wave {
+      position: absolute;
+      top: -5px;
+      left: 0;
+      right: 0;
+      height: 10px;
+      background: rgba(255, 255, 255, 0.35);
+      border-radius: 50%;
+      animation: wave 2.5s infinite linear;
+    }
+    @keyframes wave {
+      0% { transform: translateX(0) scaleY(1); }
+      50% { transform: translateX(-25%) scaleY(0.8); }
+      100% { transform: translateX(0) scaleY(1); }
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.15); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .pulsing {
+      animation: pulse-ring 2s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="p-3 sm:p-5 md:p-8 flex flex-col items-center">
+
+  <!-- Main Container -->
+  <div class="w-full max-w-5xl space-y-6">
+
+    <!-- Top Header Navigation -->
+    <header class="flex flex-col md:flex-row items-center justify-between gap-4 glass-card p-5 rounded-2xl">
+      <div class="flex items-center gap-3">
+        <div class="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-2xl shadow-lg shadow-emerald-500/10">
+          🌱
+        </div>
+        <div>
+          <h1 class="text-2xl font-bold font-display tracking-tight text-white flex items-center gap-2">
+            Drop2Crop <span class="text-xs uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-sans font-medium">Control Station</span>
+          </h1>
+          <p class="text-xs text-slate-400">
+            Hardware: <span id="clockDisplay" class="text-emerald-400 font-mono font-medium">--:--:-- BST</span> · Global Cloud Link
+          </p>
+        </div>
+      </div>
+
+      <!-- Cloud Status & Action Controls -->
+      <div class="flex items-center gap-3">
+        <div id="connPill" class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400">
+          <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+          <span id="connText">Connecting to Cloud...</span>
+        </div>
+
+        <!-- Audio Alert Toggle -->
+        <button id="soundBtn" onclick="toggleSound()" class="p-2.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 transition text-sm flex items-center gap-1.5" title="Toggle Audio Alarms">
+          <span id="soundIcon">🔊</span>
+        </button>
+
+        <!-- Device Settings Modal Trigger -->
+        <button onclick="toggleConfigModal()" class="p-2.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 transition text-sm font-mono" title="Configure Device ID">
+          ⚙️
+        </button>
+      </div>
+    </header>
+
+    <!-- CRITICAL ALERT BANNERS -->
+    <div id="alertsContainer" class="space-y-3">
+      <!-- Rain Lockout Banner -->
+      <div id="rainLockBanner" class="hidden glass-card p-4 rounded-2xl border-l-4 border-l-sky-500 bg-sky-950/40 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">🌧️</span>
+          <div>
+            <div class="text-sm font-bold text-sky-200">24-Hour Rain Lockout Active</div>
+            <div class="text-xs text-slate-400">Rain detected on sensor. Pump is locked to prevent water waste and root disease.</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="px-3 py-1.5 rounded-xl bg-slate-900 border border-sky-500/40 text-sky-300 font-mono text-sm font-bold tracking-wider" id="rainCountdown">
+            24:00:00
+          </div>
+          <button onclick="overrideRainLock()" class="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition shadow-md shadow-sky-600/30">
+            Override Lock
+          </button>
+        </div>
+      </div>
+
+      <!-- Water Tank Critical Low Alert Banner -->
+      <div id="tankAlertBanner" class="hidden glass-card p-4 rounded-2xl border-l-4 border-l-rose-500 bg-rose-950/40 flex items-center justify-between gap-3 animate-pulse">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">⚠️</span>
+          <div>
+            <div class="text-sm font-bold text-rose-300">LOW WATER RESERVOIR WARNING (&lt;20%)</div>
+            <div class="text-xs text-rose-200/70">Water level is below 20%! Please refill the reservoir immediately to prevent motor dry-burn cutoff.</div>
+          </div>
+        </div>
+        <div class="text-rose-400 text-sm font-bold font-mono px-3 py-1 rounded-lg bg-rose-900/60 border border-rose-500/40">
+          REFILL NEEDED
+        </div>
+      </div>
+
+      <!-- Soil Dry Alert Banner -->
+      <div id="soilAlertBanner" class="hidden glass-card p-4 rounded-2xl border-l-4 border-l-amber-500 bg-amber-950/40 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">🌱</span>
+          <div>
+            <div class="text-sm font-bold text-amber-300">Soil Critically Dry Alert (&lt;35%)</div>
+            <div class="text-xs text-amber-200/70">Soil moisture is low. In Alert Mode, please trigger the pump manually when ready.</div>
+          </div>
+        </div>
+        <button onclick="sendPumpCommand('on')" class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition shadow-md shadow-emerald-600/30">
+          Irrigate Now
+        </button>
+      </div>
+    </div>
+
+    <!-- MAIN SENSOR GAUGES GRID -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+      <!-- 1. Capacitive Soil Moisture Card -->
+      <div class="glass-card rounded-2xl p-6 flex flex-col justify-between relative overflow-hidden">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Soil Moisture</span>
+          <span id="soilBadge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">Optimal</span>
+        </div>
+
+        <div class="flex flex-col items-center justify-center my-6">
+          <div class="relative w-36 h-36 flex items-center justify-center">
+            <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="40" stroke="#334155" stroke-width="8" fill="transparent" />
+              <circle id="soilCircle" cx="50" cy="50" r="40" stroke="#10b981" stroke-width="8" fill="transparent"
+                      stroke-dasharray="251.2" stroke-dashoffset="125.6" stroke-linecap="round" class="transition-all duration-700 ease-out" />
+            </svg>
+            <div class="absolute flex flex-col items-center">
+              <span id="soilValue" class="text-3xl font-extrabold font-display text-white">--%</span>
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider">Moisture</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-4 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-400">
+          <span>ADC Raw: <strong id="soilRaw" class="text-slate-200 font-mono">--</strong></span>
+          <span>Target: <strong class="text-emerald-400">35% - 70%</strong></span>
+        </div>
+      </div>
+
+      <!-- 2. Ultrasonic Water Level Reservoir Card -->
+      <div class="glass-card rounded-2xl p-6 flex flex-col justify-between relative overflow-hidden">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Water Reservoir</span>
+          <span id="waterBadge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400">Normal</span>
+        </div>
+
+        <div class="flex items-center justify-center gap-6 my-4">
+          <div class="water-tank">
+            <div id="tankFill" class="water-fill" style="height: 50%;">
+              <div class="water-wave"></div>
+            </div>
+          </div>
+          <div class="flex flex-col gap-2">
+            <div>
+              <div class="text-3xl font-extrabold font-display text-white" id="waterValue">--%</div>
+              <div class="text-xs text-slate-400">Usable Volume</div>
+            </div>
+            <div class="text-xs text-slate-300 font-mono bg-slate-900/60 px-2.5 py-1.5 rounded-lg border border-slate-700">
+              Depth: <span id="waterCm">-- cm</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-4 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-400">
+          <span>Dry Cutoff: <strong class="text-rose-400">15%</strong></span>
+          <span>Alert: <strong class="text-amber-400">&lt;20%</strong></span>
+        </div>
+      </div>
+
+      <!-- 3. Rain & Weather Sensor Card -->
+      <div class="glass-card rounded-2xl p-6 flex flex-col justify-between relative overflow-hidden">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Rain Weather</span>
+          <span id="rainBadge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-700 text-slate-300">Checking...</span>
+        </div>
+
+        <div class="flex flex-col items-center justify-center my-6 text-center">
+          <div id="rainIcon" class="text-5xl mb-2">☀️</div>
+          <div id="rainStatusText" class="text-xl font-bold font-display text-white">Clear Weather</div>
+          <p class="text-xs text-slate-400 mt-1 max-w-[200px]" id="rainSubText">Safe for precision fertigation</p>
+        </div>
+
+        <div class="pt-4 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-400">
+          <span>24h Lockout: <strong id="rainLockState" class="text-slate-200">Inactive</strong></span>
+          <span>Timer: <strong id="rainSecText" class="text-sky-400 font-mono">0s</strong></span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ⏱️ MULTI-TIMER SCHEDULER SECTION -->
+    <div class="glass-card rounded-2xl p-6 sm:p-8 space-y-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-lg font-bold font-display text-white flex items-center gap-2">
+            ⏱️ Irrigation Schedules & Timers
+            <span class="text-xs font-normal text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full">Flash NVS Stored</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-1">
+            Program daily times and run durations. Add multiple cycles per day (e.g. 6:00 AM for 20m, 6:00 PM for 40m).
+          </p>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <div class="text-xs text-slate-300 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-700">
+            Next Run: <strong id="nextRunBadge" class="text-emerald-400 font-mono">--</strong>
+          </div>
+          <button onclick="openAddScheduleModal()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-md shadow-emerald-600/20 flex items-center gap-1.5">
+            <span>+</span> Add Schedule
+          </button>
+        </div>
+      </div>
+
+      <!-- Schedule Slots Grid -->
+      <div id="schedulesGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+        <div class="p-4 rounded-xl border border-slate-800 bg-slate-900/40 text-slate-500 text-xs text-center col-span-full py-8">
+          Loading active schedules from ESP32...
+        </div>
+      </div>
+    </div>
+
+    <!-- SYSTEM CONTROL PANEL (Operating Mode & Pump Switch) -->
+    <div class="glass-card rounded-2xl p-6 sm:p-8 space-y-6">
+
+      <!-- 4-Way Mode Selector -->
+      <div>
+        <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">Operating Mode Selection</label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+          <button id="modeAutoBtn" onclick="sendModeCommand(0)" class="p-3.5 rounded-xl border transition text-left flex flex-col gap-1 bg-emerald-500/10 border-emerald-500/50 text-emerald-300 shadow-lg shadow-emerald-500/10">
+            <span class="font-bold text-xs flex items-center gap-1.5">💧 Smart Auto</span>
+            <span class="text-[11px] text-slate-400 leading-snug">Soil &lt; 35% triggers pump automatically</span>
+          </button>
+          
+          <button id="modeSchedBtn" onclick="sendModeCommand(1)" class="p-3.5 rounded-xl border border-slate-700 hover:border-slate-600 bg-slate-900/40 text-slate-300 transition text-left flex flex-col gap-1">
+            <span class="font-bold text-xs flex items-center gap-1.5">⏱️ Schedule Only</span>
+            <span class="text-[11px] text-slate-400 leading-snug">Strictly runs on scheduled daily timers</span>
+          </button>
+
+          <button id="modeAlertBtn" onclick="sendModeCommand(2)" class="p-3.5 rounded-xl border border-slate-700 hover:border-slate-600 bg-slate-900/40 text-slate-300 transition text-left flex flex-col gap-1">
+            <span class="font-bold text-xs flex items-center gap-1.5">🔔 Alert Only</span>
+            <span class="text-[11px] text-slate-400 leading-snug">Sensor notifies you; manual pump control</span>
+          </button>
+
+          <button id="modeManualBtn" onclick="sendModeCommand(3)" class="p-3.5 rounded-xl border border-slate-700 hover:border-slate-600 bg-slate-900/40 text-slate-300 transition text-left flex flex-col gap-1">
+            <span class="font-bold text-xs flex items-center gap-1.5">⚙️ Full Manual</span>
+            <span class="text-[11px] text-slate-400 leading-snug">All automation off; direct remote control</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Master Pump Actuator Switch -->
+      <div class="pt-6 border-t border-slate-700/60 flex flex-col sm:flex-row items-center justify-between gap-6">
+        <div>
+          <div class="text-lg font-bold font-display text-white flex items-center gap-2">
+            Irrigation Water Pump
+            <span id="pumpStatusPill" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-sans font-medium">STOPPED</span>
+          </div>
+          <p class="text-xs text-slate-400 mt-1">
+            5V Relay Channel 1 (GPIO 9) — Triggers water flow & fertilizer through drip lines
+          </p>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <button id="pumpToggleBtn" onclick="togglePumpAction()" class="px-8 py-4 rounded-2xl font-bold font-display text-base transition-all duration-300 shadow-xl flex items-center gap-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20 active:scale-95">
+            <span class="text-xl" id="pumpBtnIcon">💧</span>
+            <span id="pumpBtnText">START PUMP</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Safety Interlock Warning Notice -->
+      <div id="safetyNotice" class="hidden text-xs text-rose-400 bg-rose-950/40 border border-rose-500/30 p-3 rounded-xl flex items-center gap-2">
+        <span>⚠️</span>
+        <span id="safetyNoticeText">Safety interlock active. Pump cannot be started.</span>
+      </div>
+
+    </div>
+
+    <!-- Live Telemetry Stream Terminal (Collapsible) -->
+    <div class="glass-card rounded-2xl overflow-hidden">
+      <button onclick="toggleTerminal()" class="w-full p-4 text-xs font-mono text-slate-400 flex items-center justify-between hover:text-slate-200 transition">
+        <span class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          Live Cloud Telemetry (test.mosquitto.org)
+        </span>
+        <span id="termToggleIcon">▼</span>
+      </button>
+      <div id="terminalBody" class="hidden p-4 bg-slate-950/80 font-mono text-xs text-emerald-400/90 border-t border-slate-800 h-40 overflow-y-auto space-y-1">
+        <div class="text-slate-500">// Real-time MQTT stream...</div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="text-center text-xs text-slate-500 pb-8">
+      Drop2Crop™ · Smart Precision Irrigation & Fertigation
+    </footer>
+
+  </div>
+
+  <!-- ADD SCHEDULE MODAL -->
+  <div id="addScheduleModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="glass-card max-w-sm w-full p-6 rounded-2xl space-y-5 border border-slate-700 bg-slate-900 shadow-2xl">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold font-display text-white">Add Irrigation Schedule</h3>
+        <button onclick="closeAddScheduleModal()" class="text-slate-400 hover:text-white text-xl">&times;</button>
+      </div>
+
+      <div class="space-y-4 text-xs">
+        <!-- Start Time -->
+        <div>
+          <label class="block text-slate-400 mb-1 font-medium">Start Time (24h or HH:MM)</label>
+          <div class="flex gap-2">
+            <select id="schedHour" class="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-mono focus:outline-none focus:border-emerald-500">
+              <!-- Hours 00 to 23 populated by JS -->
+            </select>
+            <span class="text-lg text-slate-500 self-center">:</span>
+            <select id="schedMin" class="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-mono focus:outline-none focus:border-emerald-500">
+              <option value="0">00</option>
+              <option value="5">05</option>
+              <option value="10">10</option>
+              <option value="15">15</option>
+              <option value="20">20</option>
+              <option value="25">25</option>
+              <option value="30">30</option>
+              <option value="35">35</option>
+              <option value="40">40</option>
+              <option value="45">45</option>
+              <option value="50">50</option>
+              <option value="55">55</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Duration in Minutes -->
+        <div>
+          <label class="block text-slate-400 mb-1 font-medium">Run Duration (Minutes)</label>
+          <input type="number" id="schedDur" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-mono focus:outline-none focus:border-emerald-500" value="20" min="1" max="360">
+          
+          <!-- Presets -->
+          <div class="flex gap-2 mt-2">
+            <button type="button" onclick="setDurPreset(10)" class="flex-1 py-1 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 text-[11px]">10m</button>
+            <button type="button" onclick="setDurPreset(20)" class="flex-1 py-1 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 text-[11px]">20m</button>
+            <button type="button" onclick="setDurPreset(40)" class="flex-1 py-1 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 text-[11px]">40m</button>
+            <button type="button" onclick="setDurPreset(60)" class="flex-1 py-1 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 text-[11px]">1 hour</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeAddScheduleModal()" class="px-4 py-2 rounded-xl text-xs text-slate-300 hover:bg-slate-800">Cancel</button>
+        <button onclick="saveNewSchedule()" class="px-5 py-2.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30">
+          Save Schedule
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Device Configuration Modal -->
+  <div id="configModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="glass-card max-w-md w-full p-6 rounded-2xl space-y-4 border border-slate-700 bg-slate-900 shadow-2xl">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold font-display text-white">Device Settings</h3>
+        <button onclick="toggleConfigModal()" class="text-slate-400 hover:text-white">&times;</button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1">Device ID / Hardware MAC</label>
+          <input type="text" id="cfgDeviceId" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" value="drop2crop_2884858a2564">
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1">MQTT WebSocket Broker URL</label>
+          <input type="text" id="cfgBroker" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" value="wss://test.mosquitto.org:8081">
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="toggleConfigModal()" class="px-4 py-2 rounded-xl text-xs text-slate-300 hover:bg-slate-800">Cancel</button>
+        <button onclick="saveConfig()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white">Save & Reconnect</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- APPLICATION LOGIC & MQTT CLIENT -->
+  <script>
+    // Configuration
+    let DEVICE_ID = localStorage.getItem('drop2crop_dev_id') || 'drop2crop_2884858a2564';
+    let BROKER_URL = localStorage.getItem('drop2crop_broker') || 'wss://test.mosquitto.org:8081';
+
+    let TOPIC_TELEMETRY = `drop2crop/${DEVICE_ID}/telemetry`;
+    let TOPIC_COMMAND = `drop2crop/${DEVICE_ID}/cmd`;
+    let TOPIC_STATUS = `drop2crop/${DEVICE_ID}/status`;
+
+    let client = null;
+    let soundEnabled = true;
+    let lastAlertSoundTime = 0;
+    let currentPumpState = false;
+    let currentMode = 0;
+    let isRainLocked = false;
+    let activeSchedules = [];
+
+    // Synthesized Audio Alarms
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playBeep(freq = 880, type = 'sine', duration = 0.2) {
+      if (!soundEnabled) return;
+      try {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {
+        console.warn('Audio blocked:', e);
+      }
+    }
+
+    function triggerWarningAlarm() {
+      const now = Date.now();
+      if (now - lastAlertSoundTime > 15000) {
+        lastAlertSoundTime = now;
+        playBeep(980, 'square', 0.15);
+        setTimeout(() => playBeep(1320, 'square', 0.25), 180);
+      }
+    }
+
+    function toggleSound() {
+      soundEnabled = !soundEnabled;
+      document.getElementById('soundIcon').innerText = soundEnabled ? '🔊' : '🔇';
+    }
+
+    function toggleConfigModal() {
+      document.getElementById('configModal').classList.toggle('hidden');
+      document.getElementById('cfgDeviceId').value = DEVICE_ID;
+      document.getElementById('cfgBroker').value = BROKER_URL;
+    }
+
+    function saveConfig() {
+      DEVICE_ID = document.getElementById('cfgDeviceId').value.trim();
+      BROKER_URL = document.getElementById('cfgBroker').value.trim();
+      localStorage.setItem('drop2crop_dev_id', DEVICE_ID);
+      localStorage.setItem('drop2crop_broker', BROKER_URL);
+
+      TOPIC_TELEMETRY = `drop2crop/${DEVICE_ID}/telemetry`;
+      TOPIC_COMMAND = `drop2crop/${DEVICE_ID}/cmd`;
+      TOPIC_STATUS = `drop2crop/${DEVICE_ID}/status`;
+
+      toggleConfigModal();
+      connectMQTT();
+    }
+
+    // Modal Add Schedule functions
+    function openAddScheduleModal() {
+      const hourSelect = document.getElementById('schedHour');
+      hourSelect.innerHTML = '';
+      for (let i = 0; i < 24; i++) {
+        const opt = document.createElement('option');
+        opt.value = i;
+        const ampm = i >= 12 ? 'PM' : 'AM';
+        const displayHr = i % 12 === 0 ? 12 : i % 12;
+        opt.innerText = `${i.toString().padStart(2, '0')}:00 (${displayHr} ${ampm})`;
+        if (i === 6) opt.selected = true;
+        hourSelect.appendChild(opt);
+      }
+      document.getElementById('addScheduleModal').classList.remove('hidden');
+    }
+
+    function closeAddScheduleModal() {
+      document.getElementById('addScheduleModal').classList.add('hidden');
+    }
+
+    function setDurPreset(mins) {
+      document.getElementById('schedDur').value = mins;
+    }
+
+    function saveNewSchedule() {
+      const h = parseInt(document.getElementById('schedHour').value);
+      const m = parseInt(document.getElementById('schedMin').value);
+      const dur = parseInt(document.getElementById('schedDur').value);
+
+      if (isNaN(dur) || dur <= 0) {
+        alert('Please enter a valid run duration in minutes!');
+        return;
+      }
+
+      const payload = JSON.stringify({
+        addSched: { h: h, m: m, dur: dur }
+      });
+      client.publish(TOPIC_COMMAND, payload);
+      logTerm(`Tx -> Add Schedule: ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')} for ${dur}m`);
+      closeAddScheduleModal();
+    }
+
+    function toggleScheduleSlot(id, currentState) {
+      const payload = JSON.stringify({
+        toggleSched: id,
+        en: !currentState
+      });
+      client.publish(TOPIC_COMMAND, payload);
+      logTerm(`Tx -> Toggle Schedule #${id} to ${!currentState}`);
+    }
+
+    function deleteScheduleSlot(id) {
+      if (!confirm(`Delete Schedule Slot #${id + 1}?`)) return;
+      const payload = JSON.stringify({
+        delSched: id
+      });
+      client.publish(TOPIC_COMMAND, payload);
+      logTerm(`Tx -> Delete Schedule #${id}`);
+    }
+
+    function toggleTerminal() {
+      const term = document.getElementById('terminalBody');
+      const icon = document.getElementById('termToggleIcon');
+      term.classList.toggle('hidden');
+      icon.innerText = term.classList.contains('hidden') ? '▼' : '▲';
+    }
+
+    function logTerm(msg) {
+      const term = document.getElementById('terminalBody');
+      const time = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.innerText = `[${time}] ${msg}`;
+      term.appendChild(div);
+      if (term.children.length > 50) term.removeChild(term.children[1]);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    // MQTT Connect
+    function connectMQTT() {
+      if (client) {
+        client.end();
+      }
+
+      logTerm(`Connecting to broker: ${BROKER_URL}...`);
+      document.getElementById('connPill').className = 'flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400';
+      document.getElementById('connText').innerText = 'Connecting to Cloud...';
+
+      const clientId = 'drop2crop_web_' + Math.random().toString(16).substr(2, 8);
+      client = mqtt.connect(BROKER_URL, {
+        clientId: clientId,
+        clean: true,
+        connectTimeout: 5000,
+        reconnectPeriod: 3000
+      });
+
+      client.on('connect', () => {
+        logTerm('MQTT Connected! Subscribing to telemetry...');
+        document.getElementById('connPill').className = 'flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
+        document.getElementById('connText').innerText = 'Cloud Live Online';
+
+        client.subscribe([TOPIC_TELEMETRY, TOPIC_STATUS], (err) => {
+          if (!err) logTerm(`Subscribed to: ${TOPIC_TELEMETRY}`);
+        });
+      });
+
+      client.on('message', (topic, payload) => {
+        try {
+          const str = payload.toString();
+          if (topic === TOPIC_STATUS) {
+            const st = JSON.parse(str);
+            if (st.online === false) {
+              document.getElementById('connPill').className = 'flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-rose-500/10 border border-rose-500/30 text-rose-400';
+              document.getElementById('connText').innerText = 'Hardware Offline';
+            }
+            return;
+          }
+
+          if (topic === TOPIC_TELEMETRY) {
+            const data = JSON.parse(str);
+            updateDashboard(data);
+          }
+        } catch (e) {
+          console.error('Payload parse error:', e);
+        }
+      });
+
+      client.on('error', (err) => {
+        logTerm('MQTT Error: ' + err.message);
+      });
+
+      client.on('close', () => {
+        document.getElementById('connPill').className = 'flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-700 text-slate-300';
+        document.getElementById('connText').innerText = 'Cloud Disconnected';
+      });
+    }
+
+    // Update Dashboard UI with Telemetry
+    function updateDashboard(data) {
+      // 0. Clock & Next Run
+      if (data.time) {
+        document.getElementById('clockDisplay').innerText = `${data.time} BST`;
+      }
+      if (data.nextRun) {
+        document.getElementById('nextRunBadge').innerText = data.nextRun;
+      }
+
+      // 1. Soil Moisture
+      const soilVal = data.soil ?? 0;
+      document.getElementById('soilValue').innerText = soilVal + '%';
+      document.getElementById('soilRaw').innerText = data.soilRaw ?? '--';
+
+      const offset = 251.2 - (251.2 * (soilVal / 100));
+      document.getElementById('soilCircle').style.strokeDashoffset = offset;
+
+      const soilBadge = document.getElementById('soilBadge');
+      const soilCircle = document.getElementById('soilCircle');
+      const soilAlert = document.getElementById('soilAlertBanner');
+
+      if (soilVal < 35) {
+        soilBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400';
+        soilBadge.innerText = 'Parched Dry';
+        soilCircle.style.stroke = '#ef4444';
+        soilAlert.classList.remove('hidden');
+      } else if (soilVal >= 70) {
+        soilBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400';
+        soilBadge.innerText = 'Saturated';
+        soilCircle.style.stroke = '#38bdf8';
+        soilAlert.classList.add('hidden');
+      } else {
+        soilBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
+        soilBadge.innerText = 'Optimal';
+        soilCircle.style.stroke = '#10b981';
+        soilAlert.classList.add('hidden');
+      }
+
+      // 2. Water Reservoir Level
+      const waterVal = data.water ?? 0;
+      document.getElementById('waterValue').innerText = waterVal + '%';
+      document.getElementById('waterCm').innerText = (data.waterCm ?? '--') + ' cm';
+      document.getElementById('tankFill').style.height = waterVal + '%';
+
+      const waterBadge = document.getElementById('waterBadge');
+      const tankAlert = document.getElementById('tankAlertBanner');
+
+      if (waterVal < 15) {
+        waterBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400';
+        waterBadge.innerText = 'Empty Cutoff';
+        tankAlert.classList.remove('hidden');
+        triggerWarningAlarm();
+      } else if (waterVal < 20) {
+        waterBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400';
+        waterBadge.innerText = 'Low Warning';
+        tankAlert.classList.remove('hidden');
+        triggerWarningAlarm();
+      } else {
+        waterBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400';
+        waterBadge.innerText = 'Normal';
+        tankAlert.classList.add('hidden');
+      }
+
+      // 3. Rain Sensor & Lockout
+      const rainNow = data.rainNow ?? false;
+      isRainLocked = data.rainLock ?? false;
+      const rainSec = data.rainSec ?? 0;
+
+      document.getElementById('rainLockState').innerText = isRainLocked ? 'Active' : 'Inactive';
+      document.getElementById('rainSecText').innerText = rainSec + 's';
+
+      const rainBadge = document.getElementById('rainBadge');
+      const rainIcon = document.getElementById('rainIcon');
+      const rainStatusText = document.getElementById('rainStatusText');
+      const rainSubText = document.getElementById('rainSubText');
+      const rainLockBanner = document.getElementById('rainLockBanner');
+
+      if (rainNow) {
+        rainIcon.innerText = '🌧️';
+        rainBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/20 border border-sky-500/40 text-sky-300';
+        rainBadge.innerText = 'Raining Now';
+        rainStatusText.innerText = 'Rainfall Detected';
+        rainSubText.innerText = 'Water drops on sensor plate';
+      } else {
+        rainIcon.innerText = '☀️';
+        rainBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
+        rainBadge.innerText = 'Clear';
+        rainStatusText.innerText = 'Clear Weather';
+        rainSubText.innerText = 'Safe for precision fertigation';
+      }
+
+      if (isRainLocked && rainSec > 0) {
+        rainLockBanner.classList.remove('hidden');
+        const h = Math.floor(rainSec / 3600).toString().padStart(2, '0');
+        const m = Math.floor((rainSec % 3600) / 60).toString().padStart(2, '0');
+        const s = (rainSec % 60).toString().padStart(2, '0');
+        document.getElementById('rainCountdown').innerText = `${h}:${m}:${s}`;
+      } else {
+        rainLockBanner.classList.add('hidden');
+      }
+
+      // 4. Schedules List Rendering
+      if (data.schedules) {
+        activeSchedules = data.schedules;
+        renderSchedules(activeSchedules);
+      }
+
+      // 5. Operating Mode UI
+      currentMode = data.mode ?? 0;
+      updateModeButtons(currentMode);
+
+      // 6. Pump Actuator State
+      currentPumpState = data.pump ?? false;
+      updatePumpButton(currentPumpState, data.schedRun);
+
+      // Safety Notice Check
+      const notice = document.getElementById('safetyNotice');
+      const noticeText = document.getElementById('safetyNoticeText');
+      if (waterVal < 15) {
+        notice.classList.remove('hidden');
+        noticeText.innerText = 'Dry-Run Protection Active: Water reservoir is below 15%. Pump is locked to protect motor.';
+      } else if (isRainLocked && (currentMode === 0 || currentMode === 1)) {
+        notice.classList.remove('hidden');
+        noticeText.innerText = 'Rain Delay Active: 24-hour lockout in progress. Automated & scheduled irrigation paused.';
+      } else {
+        notice.classList.add('hidden');
+      }
+    }
+
+    function renderSchedules(list) {
+      const grid = document.getElementById('schedulesGrid');
+      if (!list || list.length === 0) {
+        grid.innerHTML = `
+          <div class="p-6 rounded-xl border border-slate-800 bg-slate-900/40 text-slate-400 text-xs text-center col-span-full">
+            No active schedules configured. Click "+ Add Schedule" above to set your first timer!
+          </div>`;
+        return;
+      }
+
+      grid.innerHTML = '';
+      list.forEach((s) => {
+        const ampm = s.h >= 12 ? 'PM' : 'AM';
+        const displayHr = s.h % 12 === 0 ? 12 : s.h % 12;
+        const timeFormatted = `${displayHr.toString().padStart(2, '0')}:${s.m.toString().padStart(2, '0')} ${ampm}`;
+
+        const card = document.createElement('div');
+        card.className = `p-4 rounded-xl border transition flex items-center justify-between gap-3 ${
+          s.en 
+            ? 'bg-slate-900/80 border-emerald-500/30 shadow-md shadow-emerald-500/5' 
+            : 'bg-slate-900/30 border-slate-800 opacity-60'
+        }`;
+
+        card.innerHTML = `
+          <div class="flex items-center gap-3">
+            <button onclick="toggleScheduleSlot(${s.id}, ${s.en})" class="w-8 h-8 rounded-lg flex items-center justify-center text-sm ${
+              s.en ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'bg-slate-800 text-slate-500 border border-slate-700'
+            }" title="Toggle Schedule">
+              ${s.en ? '✓' : '—'}
+            </button>
+            <div>
+              <div class="text-base font-bold font-display text-white tracking-tight">${timeFormatted}</div>
+              <div class="text-[11px] text-slate-400 font-mono">Runs for <span class="text-emerald-400 font-semibold">${s.dur} mins</span></div>
+            </div>
+          </div>
+          <button onclick="deleteScheduleSlot(${s.id})" class="p-2 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition" title="Delete Schedule">
+            🗑️
+          </button>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function updateModeButtons(mode) {
+      const autoBtn = document.getElementById('modeAutoBtn');
+      const schedBtn = document.getElementById('modeSchedBtn');
+      const alertBtn = document.getElementById('modeAlertBtn');
+      const manualBtn = document.getElementById('modeManualBtn');
+
+      const activeClass = 'bg-emerald-500/10 border-emerald-500/50 text-emerald-300 shadow-lg shadow-emerald-500/10';
+      const inactiveClass = 'border-slate-700 hover:border-slate-600 bg-slate-900/40 text-slate-300';
+
+      autoBtn.className = `p-3.5 rounded-xl border transition text-left flex flex-col gap-1 ${mode === 0 ? activeClass : inactiveClass}`;
+      schedBtn.className = `p-3.5 rounded-xl border transition text-left flex flex-col gap-1 ${mode === 1 ? activeClass : inactiveClass}`;
+      alertBtn.className = `p-3.5 rounded-xl border transition text-left flex flex-col gap-1 ${mode === 2 ? activeClass : inactiveClass}`;
+      manualBtn.className = `p-3.5 rounded-xl border transition text-left flex flex-col gap-1 ${mode === 3 ? activeClass : inactiveClass}`;
+    }
+
+    function updatePumpButton(isOn, isScheduled) {
+      const pill = document.getElementById('pumpStatusPill');
+      const btn = document.getElementById('pumpToggleBtn');
+      const btnText = document.getElementById('pumpBtnText');
+      const btnIcon = document.getElementById('pumpBtnIcon');
+
+      if (isOn) {
+        pill.className = 'text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-sans font-semibold animate-pulse';
+        pill.innerText = isScheduled ? 'TIMER ACTIVE ⏱️' : 'RUNNING 🌊';
+
+        btn.className = 'px-8 py-4 rounded-2xl font-bold font-display text-base transition-all duration-300 shadow-xl flex items-center gap-3 bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 active:scale-95';
+        btnText.innerText = 'STOP PUMP';
+        btnIcon.innerText = '🛑';
+      } else {
+        pill.className = 'text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-sans font-medium';
+        pill.innerText = 'IDLE / OFF';
+
+        btn.className = 'px-8 py-4 rounded-2xl font-bold font-display text-base transition-all duration-300 shadow-xl flex items-center gap-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20 active:scale-95';
+        btnText.innerText = 'START PUMP';
+        btnIcon.innerText = '💧';
+      }
+    }
+
+    // Commands to Cloud
+    function sendPumpCommand(state) {
+      if (!client || !client.connected) {
+        alert('Cannot send command: Cloud is disconnected!');
+        return;
+      }
+      const payload = JSON.stringify({ pump: state });
+      client.publish(TOPIC_COMMAND, payload);
+      logTerm(`Tx -> Pump: ${state}`);
+    }
+
+    function togglePumpAction() {
+      sendPumpCommand(currentPumpState ? 'off' : 'on');
+    }
+
+    function sendModeCommand(modeIndex) {
+      if (!client || !client.connected) {
+        alert('Cannot send command: Cloud is disconnected!');
+        return;
+      }
+      const payload = JSON.stringify({ mode: modeIndex });
+      client.publish(TOPIC_COMMAND, payload);
+      logTerm(`Tx -> Set Mode: ${modeIndex}`);
+      updateModeButtons(modeIndex);
+    }
+
+    function overrideRainLock() {
+      if (!client || !client.connected) return;
+      const payload = JSON.stringify({ clearRainLock: true });
+      client.publish(TOPIC_COMMAND, payload);
+      logTerm(`Tx -> Clear Rain Lockout`);
+    }
+
+    // Initialize on page load
+    window.addEventListener('load', () => {
+      connectMQTT();
+    });
+  </script>
+</body>
+</html>
