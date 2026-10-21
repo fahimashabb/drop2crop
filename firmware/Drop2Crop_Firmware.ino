@@ -801,7 +801,8 @@ void connectMQTT() {
 // ==================== SETUP & LOOP ====================
 void setup() {
   Serial.begin(115200);
-  delay(500);
+  Serial.setTxTimeoutMs(0); // Prevents blocking / watchdog resets if serial buffer is full
+  delay(300);
   Serial.println("\n==============================================");
   Serial.println("  Drop2Crop - Cloud IoT & Precision Station");
   Serial.println("==============================================");
@@ -896,6 +897,14 @@ void loop() {
       }
     } else {
       mqttClient.loop();
+    }
+  } else {
+    // Auto-reconnect if WiFi disconnects
+    static unsigned long lastWifiReconnectAttempt = 0;
+    if (millis() - lastWifiReconnectAttempt > 5000) {
+      lastWifiReconnectAttempt = millis();
+      Serial.printf("[WiFi] WiFi connection lost. Reconnecting to %s...\n", wifiSSID.c_str());
+      WiFi.reconnect();
     }
   }
 

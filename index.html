@@ -1219,8 +1219,8 @@
     setInterval(() => {
       if (lastTelemetryTimestamp > 0) {
         const diff = Date.now() - lastTelemetryTimestamp;
-        if (diff > 6000) {
-          updateDeviceOnlineState(false, 'Heartbeat timeout (>6s)');
+        if (diff > 15000) {
+          updateDeviceOnlineState(false, 'Heartbeat timeout (>15s)');
         } else {
           updateDeviceOnlineState(true);
         }
