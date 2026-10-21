@@ -484,6 +484,9 @@ void publishTelemetry() {
   doc["rainLock"] = rainLocked;
   doc["rainSec"]  = rainRemainingSec;
 
+  doc["online"]   = true;
+  doc["uptime"]   = (unsigned long)(millis() / 1000);
+  doc["rssi"]     = WiFi.RSSI();
   doc["pump"]     = pumpActive;
   doc["mode"]     = (int)currentMode;
   doc["schedRun"] = scheduleRunning;
@@ -591,9 +594,12 @@ void connectMQTT() {
   Serial.print(" as ");
   Serial.println(deviceId);
 
-  if (mqttClient.connect(deviceId)) {
+  // Connect with Last Will and Testament (LWT)
+  // When ESP32 loses power or unplugs, broker automatically broadcasts {"online":false}
+  if (mqttClient.connect(deviceId, topicStatus, 0, true, "{\"online\":false}")) {
     Serial.println("[MQTT] Connected to Cloud Broker!");
-    mqttClient.publish(topicStatus, "{\"online\":true}");
+    // Publish retained online status so web clients connecting later instantly see the online state
+    mqttClient.publish(topicStatus, "{\"online\":true}", true);
     mqttClient.subscribe(topicCommand);
     Serial.print("[MQTT] Subscribed to: ");
     Serial.println(topicCommand);

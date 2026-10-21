@@ -111,20 +111,36 @@
         </div>
       </div>
 
-      <!-- Cloud Status & Action Controls -->
-      <div class="flex items-center gap-3">
-        <div id="connPill" class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400">
-          <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-          <span id="connText">Connecting to Cloud...</span>
+      <!-- Cloud Status & Hardware State & Controls -->
+      <div class="flex flex-wrap items-center justify-end gap-2.5">
+        <!-- Hardware Device Online/Offline Badge -->
+        <div id="deviceStatusPill" class="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-rose-500/15 border border-rose-500/40 text-rose-400 transition-all shadow-sm">
+          <span id="deviceStatusDot" class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+          <div class="flex items-center gap-1.5">
+            <span id="deviceStatusText" class="font-bold">The Device is Not Online</span>
+            <span id="deviceStatusSub" class="text-[10px] text-rose-300/80 hidden sm:inline">(Turned Off)</span>
+          </div>
         </div>
 
+        <!-- Cloud Broker Connectivity -->
+        <div id="cloudPill" class="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium bg-slate-800 border border-slate-700 text-slate-400" title="MQTT Cloud Broker Connection">
+          <span id="cloudDot" class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+          <span id="cloudText">Connecting</span>
+        </div>
+
+        <!-- Hardware Diagnostic Guide Modal Trigger -->
+        <button onclick="toggleDiagModal()" class="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 transition text-xs font-semibold flex items-center gap-1.5" title="Hardware Health & Diagnostics">
+          <span>🩺</span>
+          <span class="hidden sm:inline">Diagnostics</span>
+        </button>
+
         <!-- Audio Alert Toggle -->
-        <button id="soundBtn" onclick="toggleSound()" class="p-2.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 transition text-sm flex items-center gap-1.5" title="Toggle Audio Alarms">
+        <button id="soundBtn" onclick="toggleSound()" class="p-2 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 transition text-sm flex items-center gap-1.5" title="Toggle Audio Alarms">
           <span id="soundIcon">🔊</span>
         </button>
 
         <!-- Device Settings Modal Trigger -->
-        <button onclick="toggleConfigModal()" class="p-2.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 transition text-sm font-mono" title="Configure Device ID">
+        <button onclick="toggleConfigModal()" class="p-2 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 transition text-sm font-mono" title="Configure Device ID">
           ⚙️
         </button>
       </div>
@@ -132,6 +148,31 @@
 
     <!-- CRITICAL ALERT BANNERS -->
     <div id="alertsContainer" class="space-y-3">
+      <!-- Device Offline / Turned Off Warning Banner -->
+      <div id="deviceOfflineBanner" class="glass-card p-4 rounded-2xl border-l-4 border-l-rose-500 bg-rose-950/40 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg shadow-rose-950/30">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-2xl flex-shrink-0">
+            🔌
+          </div>
+          <div>
+            <div class="text-sm font-bold text-rose-200 flex items-center gap-2">
+              The Device is Not Online
+              <span class="text-[10px] uppercase px-2 py-0.5 rounded-full bg-rose-500/30 border border-rose-500/50 text-rose-200 font-mono font-bold">Turned Off</span>
+            </div>
+            <div class="text-xs text-rose-200/80 mt-0.5">
+              The ESP32 controller is not transmitting telemetry. It may be turned off, unplugged from the 5V charger, or disconnected from Wi-Fi.
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <span id="deviceLastSeenBadge" class="text-xs font-mono font-semibold px-3 py-1.5 rounded-xl bg-slate-900 border border-rose-500/30 text-rose-300">
+            Last Active: Checking...
+          </span>
+          <button onclick="toggleDiagModal()" class="px-3 py-1.5 rounded-xl bg-rose-800/60 hover:bg-rose-700 border border-rose-600/40 text-rose-100 text-xs font-semibold transition">
+            Check Diagnostics
+          </button>
+        </div>
+      </div>
       <!-- Rain Lockout Banner -->
       <div id="rainLockBanner" class="hidden glass-card p-4 rounded-2xl border-l-4 border-l-sky-500 bg-sky-950/40 flex flex-col sm:flex-row items-center justify-between gap-3">
         <div class="flex items-center gap-3">
@@ -455,6 +496,70 @@
     </div>
   </div>
 
+  <!-- Hardware Diagnostic & Health Modal -->
+  <div id="diagModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="glass-card max-w-lg w-full p-6 rounded-2xl space-y-4 border border-slate-700 bg-slate-900 shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">🩺</span>
+          <div>
+            <h3 class="text-lg font-bold font-display text-white">ESP32 Hardware Diagnostics</h3>
+            <p class="text-xs text-slate-400">How to verify your device is working properly</p>
+          </div>
+        </div>
+        <button onclick="toggleDiagModal()" class="text-slate-400 hover:text-white text-xl">&times;</button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <!-- 1. Red Power LED -->
+        <div class="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 space-y-1">
+          <div class="font-bold text-rose-400 flex items-center gap-2 text-sm">
+            <span>🔴 1. Red Power LED (Board Power Check)</span>
+          </div>
+          <p class="text-slate-300 leading-relaxed">
+            When you plug the 5V mobile charger into the ESP32, the red <strong>PWR</strong> LED on the board must turn on immediately and stay solid. If no LED lights up, verify your charger, USB cable, or power outlet.
+          </p>
+        </div>
+
+        <!-- 2. Wi-Fi Beacon Check -->
+        <div class="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 space-y-1">
+          <div class="font-bold text-sky-400 flex items-center gap-2 text-sm">
+            <span>📶 2. Wi-Fi "Proof of Life" Beacon</span>
+          </div>
+          <p class="text-slate-300 leading-relaxed">
+            If the ESP32 is powered but cannot connect to your Wi-Fi within 12s, it automatically broadcasts an open Wi-Fi network named <strong class="text-white font-mono bg-slate-900 px-1.5 py-0.5 rounded">Drop2Crop_WiFi_Setup</strong>. If this appears in your phone's Wi-Fi list, <strong>the ESP32 microcontroller, CPU, and Wi-Fi chip are 100% healthy and working</strong>!
+          </p>
+        </div>
+
+        <!-- 3. Real-time Telemetry -->
+        <div class="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 space-y-1">
+          <div class="font-bold text-emerald-400 flex items-center gap-2 text-sm">
+            <span>🌐 3. Live Dashboard "Device Online" Badge</span>
+          </div>
+          <p class="text-slate-300 leading-relaxed">
+            Once connected to your home Wi-Fi and the cloud, the top status badge automatically changes from <strong class="text-rose-400">The Device is Not Online</strong> to a green pulsing <strong class="text-emerald-400">Device Online</strong>. The telemetry cards update live every 2 seconds.
+          </p>
+        </div>
+
+        <!-- 4. Relay Click Test -->
+        <div class="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 space-y-1">
+          <div class="font-bold text-amber-400 flex items-center gap-2 text-sm">
+            <span>⚡ 4. Relay Mechanical "Click" Test</span>
+          </div>
+          <p class="text-slate-300 leading-relaxed">
+            Switch to <strong>Mode 3 (Manual Cloud)</strong> and press "Turn ON Pump". You will hear an audible mechanical <em>"CLICK"</em> from the relay cube, and the channel 1 LED on the relay board will turn ON.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-2">
+        <button onclick="toggleDiagModal()" class="px-5 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30">
+          Close Guide
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- APPLICATION LOGIC & MQTT CLIENT -->
   <script>
     // Configuration
@@ -595,6 +700,73 @@
       icon.innerText = term.classList.contains('hidden') ? '▼' : '▲';
     }
 
+    function toggleDiagModal() {
+      document.getElementById('diagModal').classList.toggle('hidden');
+    }
+
+    let lastTelemetryTimestamp = 0;
+    let isDeviceOnline = false;
+
+    function updateDeviceOnlineState(online, reason) {
+      const pill = document.getElementById('deviceStatusPill');
+      const dot = document.getElementById('deviceStatusDot');
+      const text = document.getElementById('deviceStatusText');
+      const sub = document.getElementById('deviceStatusSub');
+      const banner = document.getElementById('deviceOfflineBanner');
+      const badge = document.getElementById('deviceLastSeenBadge');
+
+      if (online) {
+        isDeviceOnline = true;
+        if (pill) pill.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 transition-all shadow-sm';
+        if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+        if (text) text.innerText = 'Device Online';
+        if (sub) {
+          sub.innerText = '(Live Telemetry)';
+          sub.className = 'text-[10px] text-emerald-400/80 hidden sm:inline font-mono';
+        }
+        if (banner) banner.classList.add('hidden');
+      } else {
+        isDeviceOnline = false;
+        if (pill) pill.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-rose-500/15 border border-rose-500/40 text-rose-400 transition-all shadow-sm';
+        if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
+        if (text) text.innerText = 'The Device is Not Online';
+        if (sub) {
+          sub.innerText = '(Turned Off)';
+          sub.className = 'text-[10px] text-rose-300/80 hidden sm:inline font-mono';
+        }
+        if (banner) banner.classList.remove('hidden');
+
+        if (badge) {
+          if (lastTelemetryTimestamp > 0) {
+            const elapsedSec = Math.floor((Date.now() - lastTelemetryTimestamp) / 1000);
+            if (elapsedSec < 60) {
+              badge.innerText = `Last Active: ${elapsedSec}s ago`;
+            } else if (elapsedSec < 3600) {
+              badge.innerText = `Last Active: ${Math.floor(elapsedSec / 60)}m ago`;
+            } else {
+              badge.innerText = `Last Active: ${Math.floor(elapsedSec / 3600)}h ago`;
+            }
+          } else {
+            badge.innerText = 'Last Active: No Telemetry Received';
+          }
+        }
+      }
+    }
+
+    // Watchdog check every 1000ms
+    setInterval(() => {
+      if (lastTelemetryTimestamp > 0) {
+        const diff = Date.now() - lastTelemetryTimestamp;
+        if (diff > 6000) {
+          updateDeviceOnlineState(false, 'Heartbeat timeout (>6s)');
+        } else {
+          updateDeviceOnlineState(true);
+        }
+      } else {
+        updateDeviceOnlineState(false, 'No initial message');
+      }
+    }, 1000);
+
     function logTerm(msg) {
       const term = document.getElementById('terminalBody');
       const time = new Date().toLocaleTimeString();
@@ -612,8 +784,12 @@
       }
 
       logTerm(`Connecting to broker: ${BROKER_URL}...`);
-      document.getElementById('connPill').className = 'flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400';
-      document.getElementById('connText').innerText = 'Connecting to Cloud...';
+      const cloudPill = document.getElementById('cloudPill');
+      const cloudDot = document.getElementById('cloudDot');
+      const cloudText = document.getElementById('cloudText');
+      if (cloudPill) cloudPill.className = 'hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium bg-slate-800 border border-slate-700 text-slate-400';
+      if (cloudDot) cloudDot.className = 'w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse';
+      if (cloudText) cloudText.innerText = 'Connecting...';
 
       const clientId = 'drop2crop_web_' + Math.random().toString(16).substr(2, 8);
       client = mqtt.connect(BROKER_URL, {
@@ -624,12 +800,13 @@
       });
 
       client.on('connect', () => {
-        logTerm('MQTT Connected! Subscribing to telemetry...');
-        document.getElementById('connPill').className = 'flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
-        document.getElementById('connText').innerText = 'Cloud Live Online';
+        logTerm('MQTT Connected! Subscribing to telemetry & status...');
+        if (cloudPill) cloudPill.className = 'hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium bg-emerald-950/60 border border-emerald-500/30 text-emerald-400';
+        if (cloudDot) cloudDot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400';
+        if (cloudText) cloudText.innerText = 'Cloud Live';
 
         client.subscribe([TOPIC_TELEMETRY, TOPIC_STATUS], (err) => {
-          if (!err) logTerm(`Subscribed to: ${TOPIC_TELEMETRY}`);
+          if (!err) logTerm(`Subscribed to: ${TOPIC_TELEMETRY} & ${TOPIC_STATUS}`);
         });
       });
 
@@ -639,14 +816,21 @@
           if (topic === TOPIC_STATUS) {
             const st = JSON.parse(str);
             if (st.online === false) {
-              document.getElementById('connPill').className = 'flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-rose-500/10 border border-rose-500/30 text-rose-400';
-              document.getElementById('connText').innerText = 'Hardware Offline';
+              lastTelemetryTimestamp = 0;
+              updateDeviceOnlineState(false, 'Status topic reported offline');
+              logTerm('Alert: ESP32 reported OFFLINE (Turned off / Unplugged)');
+            } else if (st.online === true) {
+              lastTelemetryTimestamp = Date.now();
+              updateDeviceOnlineState(true);
+              logTerm('Cloud: ESP32 reported ONLINE');
             }
             return;
           }
 
           if (topic === TOPIC_TELEMETRY) {
             const data = JSON.parse(str);
+            lastTelemetryTimestamp = Date.now();
+            updateDeviceOnlineState(true);
             updateDashboard(data);
           }
         } catch (e) {
@@ -659,8 +843,10 @@
       });
 
       client.on('close', () => {
-        document.getElementById('connPill').className = 'flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-700 text-slate-300';
-        document.getElementById('connText').innerText = 'Cloud Disconnected';
+        if (cloudPill) cloudPill.className = 'hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium bg-slate-800 border border-slate-700 text-slate-400';
+        if (cloudDot) cloudDot.className = 'w-1.5 h-1.5 rounded-full bg-rose-400';
+        if (cloudText) cloudText.innerText = 'Cloud Disconnected';
+        updateDeviceOnlineState(false, 'Broker disconnected');
       });
     }
 
@@ -878,7 +1064,11 @@
     // Commands to Cloud
     function sendPumpCommand(state) {
       if (!client || !client.connected) {
-        alert('Cannot send command: Cloud is disconnected!');
+        alert('Cannot send command: Cloud broker is disconnected!');
+        return;
+      }
+      if (!isDeviceOnline) {
+        alert('⚠️ Cannot execute command: The device is not online!\n\nThe ESP32 controller is currently turned off or disconnected from power. Please plug in the 5V charger and ensure the device is connected to Wi-Fi.');
         return;
       }
       const payload = JSON.stringify({ pump: state });
@@ -892,7 +1082,11 @@
 
     function sendModeCommand(modeIndex) {
       if (!client || !client.connected) {
-        alert('Cannot send command: Cloud is disconnected!');
+        alert('Cannot send command: Cloud broker is disconnected!');
+        return;
+      }
+      if (!isDeviceOnline) {
+        alert('⚠️ Cannot execute command: The device is not online!\n\nThe ESP32 controller is currently turned off or disconnected from power. Please plug in the 5V charger and ensure the device is connected to Wi-Fi.');
         return;
       }
       const payload = JSON.stringify({ mode: modeIndex });

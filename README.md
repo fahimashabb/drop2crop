@@ -121,6 +121,32 @@ Drop2Crop features an onboard, clock-driven scheduling engine synchronized to **
 
 ---
 
+## 🔌 Real-Time Device Online / Offline Detection
+When you unplug the 5V mobile charger or power is removed from the ESP32:
+- **Instant Cloud Detection:** A dual-layer MQTT Last Will & Testament (LWT) and a 6-second web watchdog continuously monitor the hardware's pulse.
+- **Visual Alert Banner:** The dashboard changes from green to a prominent red **"The Device is Not Online (Turned Off)"** status pill and displays a top warning banner showing how long ago the device was last seen.
+- **Safety Lock:** Cloud pump commands are safely locked when the device is offline to prevent confusion.
+
+---
+
+## 🩺 Hardware Verification & Diagnostic Guide
+How to verify that your ESP32 is working properly when powered on:
+
+1. **🔴 Red Power LED (Board Power Check):**
+   - Connect the 5V charger. The solid red **PWR** LED on the ESP32 board should turn on immediately.
+   - *If dark:* Check your USB-C cable or charger plug.
+2. **📶 Wi-Fi "Proof of Life" Beacon (Zero-tool test):**
+   - If the ESP32 is powered on but cannot reach your Wi-Fi within 12 seconds, it automatically broadcasts an open Wi-Fi network: **`Drop2Crop_WiFi_Setup`**.
+   - If you see this network on your phone, **your ESP32 CPU, memory, and Wi-Fi radio are 100% healthy and working**.
+3. **🌐 Web Dashboard Telemetry Stream:**
+   - Once connected to your Wi-Fi, open **[Drop2Crop Web Dashboard](https://fahimashabb.github.io/drop2crop/)**.
+   - The status pill will flip to a pulsing green **"Device Online"** badge, and sensor readings (soil moisture & water reservoir level) will stream in real time every 2 seconds.
+4. **⚡ Relay Mechanical Click Test:**
+   - On the web app, select **Mode 3 (Manual Cloud Override)** and click **"Start Pump"**.
+   - You will hear an audible physical **"CLICK"** from the blue relay cube, and the channel 1 LED on the relay module will light up.
+
+---
+
 ## 🛠️ Compiling & Uploading Firmware
 If you wish to modify or flash the firmware manually:
 
