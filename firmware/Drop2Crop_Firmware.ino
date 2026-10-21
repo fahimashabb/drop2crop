@@ -55,6 +55,7 @@ struct TimerSchedule {
   uint8_t hour;         // 0 - 23
   uint8_t minute;       // 0 - 59
   uint16_t durationMin; // Duration in minutes
+  uint8_t target;       // 0 = Motor 1 (Clean Water), 1 = Motor 2 (Fertigation), 2 = Both
   bool ranToday;
 };
 
@@ -62,6 +63,7 @@ TimerSchedule schedules[MAX_SCHEDULES];
 int numSchedules = 0;
 
 bool scheduleRunning = false;
+uint8_t scheduleTarget = 0;
 unsigned long scheduleEndTime = 0;
 char nextRunString[32] = "None";
 
@@ -111,8 +113,8 @@ unsigned long rainRemainingSec = 0;
 float waterDistCm = 0.0;
 int waterTankPercent = 0;
 
-bool pumpActive = false;
-bool valveActive = false;
+bool pumpWaterActive = false; // Motor 1: Clean Water Irrigation Pump (Relay 1, GPIO 9)
+bool pumpFertActive  = false; // Motor 2: Fertigation Nutrient Pump (Relay 2, GPIO 10)
 
 // NTP Time variables (UTC+6 Bangladesh Standard Time)
 const long  GMT_OFFSET_SEC = 21600;
@@ -145,23 +147,25 @@ void loadCredentials() {
   if (numSchedules > MAX_SCHEDULES) numSchedules = MAX_SCHEDULES;
 
   for (int i = 0; i < numSchedules; i++) {
-    char keyEn[8], keyHr[8], keyMin[8], keyDur[8];
+    char keyEn[8], keyHr[8], keyMin[8], keyDur[8], keyTgt[8];
     snprintf(keyEn, sizeof(keyEn), "e%d", i);
     snprintf(keyHr, sizeof(keyHr), "h%d", i);
     snprintf(keyMin, sizeof(keyMin), "m%d", i);
     snprintf(keyDur, sizeof(keyDur), "d%d", i);
+    snprintf(keyTgt, sizeof(keyTgt), "t%d", i);
 
     schedules[i].enabled = preferences.getBool(keyEn, true);
     schedules[i].hour = preferences.getUChar(keyHr, 6);
     schedules[i].minute = preferences.getUChar(keyMin, 0);
     schedules[i].durationMin = preferences.getUShort(keyDur, 20);
+    schedules[i].target = preferences.getUChar(keyTgt, 0); // 0=Water, 1=Fert, 2=Both
     schedules[i].ranToday = false;
   }
   preferences.end();
 
   if (numSchedules == 0) {
-    schedules[0] = {true, 6, 0, 20, false};   // 06:00 AM for 20 mins
-    schedules[1] = {true, 18, 0, 40, false};  // 06:00 PM for 40 mins
+    schedules[0] = {true, 6, 0, 20, 0, false};   // 06:00 AM for 20 mins -> Motor 1 (Clean Water)
+    schedules[1] = {true, 18, 0, 15, 1, false};  // 06:00 PM for 15 mins -> Motor 2 (Fertigation)
     numSchedules = 2;
     saveSchedulesToNVS();
   }
@@ -189,16 +193,18 @@ void saveSchedulesToNVS() {
   preferences.putInt("count", numSchedules);
 
   for (int i = 0; i < numSchedules; i++) {
-    char keyEn[8], keyHr[8], keyMin[8], keyDur[8];
+    char keyEn[8], keyHr[8], keyMin[8], keyDur[8], keyTgt[8];
     snprintf(keyEn, sizeof(keyEn), "e%d", i);
     snprintf(keyHr, sizeof(keyHr), "h%d", i);
     snprintf(keyMin, sizeof(keyMin), "m%d", i);
     snprintf(keyDur, sizeof(keyDur), "d%d", i);
+    snprintf(keyTgt, sizeof(keyTgt), "t%d", i);
 
     preferences.putBool(keyEn, schedules[i].enabled);
     preferences.putUChar(keyHr, schedules[i].hour);
     preferences.putUChar(keyMin, schedules[i].minute);
     preferences.putUShort(keyDur, schedules[i].durationMin);
+    preferences.putUChar(keyTgt, schedules[i].target);
   }
   preferences.end();
   Serial.println("[NVS] Schedules saved to Flash.");
@@ -293,30 +299,49 @@ void startCaptivePortal() {
   Serial.println("==============================================\n");
 }
 
-// ==================== ACTUATOR CONTROL ====================
-void setPump(bool state, const char* reason = "Manual") {
+// ==================== ACTUATOR CONTROL (DUAL MOTOR) ====================
+void setWaterPump(bool state, const char* reason = "Manual") {
   if (state && waterTankPercent < TANK_EMPTY_CUTOFF) {
-    Serial.printf("[SAFETY BLOCK] Pump (%s) blocked: Tank < 15%% empty!\n", reason);
-    pumpActive = false;
+    Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: Tank < 15%% empty!\n", reason);
+    pumpWaterActive = false;
     digitalWrite(PIN_RELAY_PUMP, HIGH);
     return;
   }
 
   if (state && rainLocked && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
-    Serial.printf("[SAFETY BLOCK] Pump (%s) blocked: 24h Rain Lockout!\n", reason);
-    pumpActive = false;
+    Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: 24h Rain Lockout!\n", reason);
+    pumpWaterActive = false;
     digitalWrite(PIN_RELAY_PUMP, HIGH);
     return;
   }
 
-  pumpActive = state;
-  digitalWrite(PIN_RELAY_PUMP, pumpActive ? LOW : HIGH);
-  Serial.printf("[RELAY] Pump state -> %s (Trigger: %s)\n", pumpActive ? "ON" : "OFF", reason);
+  pumpWaterActive = state;
+  digitalWrite(PIN_RELAY_PUMP, pumpWaterActive ? LOW : HIGH);
+  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Trigger: %s)\n", pumpWaterActive ? "ON" : "OFF", reason);
 }
 
-void setValve(bool state) {
-  valveActive = state;
-  digitalWrite(PIN_RELAY_VALVE, valveActive ? LOW : HIGH);
+void setFertPump(bool state, const char* reason = "Manual") {
+  if (state && waterTankPercent < TANK_EMPTY_CUTOFF) {
+    Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: Tank < 15%% empty!\n", reason);
+    pumpFertActive = false;
+    digitalWrite(PIN_RELAY_VALVE, HIGH);
+    return;
+  }
+
+  if (state && rainLocked && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
+    Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: 24h Rain Lockout!\n", reason);
+    pumpFertActive = false;
+    digitalWrite(PIN_RELAY_VALVE, HIGH);
+    return;
+  }
+
+  pumpFertActive = state;
+  digitalWrite(PIN_RELAY_VALVE, pumpFertActive ? LOW : HIGH);
+  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Trigger: %s)\n", pumpFertActive ? "ON" : "OFF", reason);
+}
+
+void setPump(bool state, const char* reason = "Manual") {
+  setWaterPump(state, reason);
 }
 
 // ==================== SENSOR READING ====================
@@ -396,8 +421,9 @@ void processScheduler() {
   if (scheduleRunning) {
     if (millis() >= scheduleEndTime) {
       scheduleRunning = false;
-      Serial.println("[TIMER] Scheduled run finished. Turning pump OFF.");
-      setPump(false, "Timer Finished");
+      Serial.println("[TIMER] Scheduled run finished. Turning both motors OFF.");
+      setWaterPump(false, "Timer Finished");
+      setFertPump(false, "Timer Finished");
     }
     return;
   }
@@ -420,10 +446,19 @@ void processScheduler() {
           }
 
           scheduleRunning = true;
+          scheduleTarget = schedules[i].target;
           scheduleEndTime = millis() + (schedules[i].durationMin * 60000UL);
-          Serial.printf("[TIMER TRIGGER] Starting Schedule %d: %02d:%02d for %d mins!\n",
-                        i + 1, schedules[i].hour, schedules[i].minute, schedules[i].durationMin);
-          setPump(true, "Timer Schedule");
+          Serial.printf("[TIMER TRIGGER] Starting Schedule %d: %02d:%02d for %d mins (Target Motor: %d)!\n",
+                        i + 1, schedules[i].hour, schedules[i].minute, schedules[i].durationMin, scheduleTarget);
+
+          if (scheduleTarget == 0) {
+            setWaterPump(true, "Timer Schedule (Watering)");
+          } else if (scheduleTarget == 1) {
+            setFertPump(true, "Timer Schedule (Fertigation)");
+          } else {
+            setWaterPump(true, "Timer Schedule (Both)");
+            setFertPump(true, "Timer Schedule (Both)");
+          }
           break;
         }
       }
@@ -459,27 +494,29 @@ void processScheduler() {
 
 // ==================== AUTOMATION ENGINE ====================
 void processAutomation() {
-  if (waterTankPercent < TANK_EMPTY_CUTOFF && pumpActive) {
-    Serial.println("[SAFETY CUTOFF] Tank empty! Stopping pump.");
+  if (waterTankPercent < TANK_EMPTY_CUTOFF && (pumpWaterActive || pumpFertActive)) {
+    Serial.println("[SAFETY CUTOFF] Tank < 15%! Emergency stopping both motors.");
     scheduleRunning = false;
-    setPump(false, "Emergency Cutoff");
+    setWaterPump(false, "Emergency Cutoff");
+    setFertPump(false, "Emergency Cutoff");
     return;
   }
 
-  if (rainLocked && pumpActive && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
-    Serial.println("[SAFETY CUTOFF] Rain lockout active! Stopping pump.");
+  if (rainLocked && (pumpWaterActive || pumpFertActive) && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
+    Serial.println("[SAFETY CUTOFF] Rain lockout active! Stopping both motors.");
     scheduleRunning = false;
-    setPump(false, "Rain Lockout");
+    setWaterPump(false, "Rain Lockout");
+    setFertPump(false, "Rain Lockout");
     return;
   }
 
   if (currentMode == MODE_AUTO_IRRIGATE && !scheduleRunning) {
-    if (soilPercent < SOIL_DRY_THRESHOLD && !pumpActive && !rainLocked && waterTankPercent >= TANK_EMPTY_CUTOFF) {
-      Serial.println("[AUTO TRIGGER] Soil moisture < 35%. Starting irrigation.");
-      setPump(true, "Soil Sensor Auto");
-    } else if (soilPercent >= SOIL_WET_THRESHOLD && pumpActive) {
-      Serial.println("[AUTO SHUTOFF] Optimal moisture reached. Stopping pump.");
-      setPump(false, "Soil Saturated");
+    if (soilPercent < SOIL_DRY_THRESHOLD && !pumpWaterActive && !rainLocked && waterTankPercent >= TANK_EMPTY_CUTOFF) {
+      Serial.println("[AUTO TRIGGER] Soil moisture < 35%. Starting Motor 1 (Watering).");
+      setWaterPump(true, "Soil Sensor Auto");
+    } else if (soilPercent >= SOIL_WET_THRESHOLD && pumpWaterActive) {
+      Serial.println("[AUTO SHUTOFF] Optimal moisture reached. Stopping Motor 1 (Watering).");
+      setWaterPump(false, "Soil Saturated");
     }
   }
 }
@@ -505,9 +542,11 @@ void publishTelemetry() {
   doc["online"]   = true;
   doc["uptime"]   = (unsigned long)(millis() / 1000);
   doc["rssi"]     = WiFi.RSSI();
-  doc["pump"]     = pumpActive;
+  doc["pump"]     = pumpWaterActive; // Motor 1: Clean Water
+  doc["fert"]     = pumpFertActive;  // Motor 2: Fertigation Nutrient
   doc["mode"]     = (int)currentMode;
   doc["schedRun"] = scheduleRunning;
+  doc["schedTgt"] = scheduleTarget;
   doc["nextRun"]  = nextRunString;
 
   JsonArray arr = doc.createNestedArray("schedules");
@@ -518,6 +557,7 @@ void publishTelemetry() {
     s["h"]   = schedules[i].hour;
     s["m"]   = schedules[i].minute;
     s["dur"] = schedules[i].durationMin;
+    s["tgt"] = schedules[i].target; // 0=Water, 1=Fert, 2=Both
   }
 
   char buffer[512];
@@ -556,9 +596,31 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     const char* pCmd = doc["pump"];
     scheduleRunning = false;
     if (strcmp(pCmd, "on") == 0) {
-      setPump(true, "App Remote Command");
+      setWaterPump(true, "App Remote Command (Motor 1)");
     } else if (strcmp(pCmd, "off") == 0) {
-      setPump(false, "App Remote Command");
+      setWaterPump(false, "App Remote Command (Motor 1)");
+    }
+  }
+
+  if (doc.containsKey("fert")) {
+    const char* fCmd = doc["fert"];
+    scheduleRunning = false;
+    if (strcmp(fCmd, "on") == 0) {
+      setFertPump(true, "App Remote Command (Motor 2)");
+    } else if (strcmp(fCmd, "off") == 0) {
+      setFertPump(false, "App Remote Command (Motor 2)");
+    }
+  }
+
+  if (doc.containsKey("both")) {
+    const char* bCmd = doc["both"];
+    scheduleRunning = false;
+    if (strcmp(bCmd, "on") == 0) {
+      setWaterPump(true, "App Remote Command (Both)");
+      setFertPump(true, "App Remote Command (Both)");
+    } else if (strcmp(bCmd, "off") == 0) {
+      setWaterPump(false, "App Remote Command (Both)");
+      setFertPump(false, "App Remote Command (Both)");
     }
   }
 
@@ -583,12 +645,14 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       schedules[numSchedules].hour = s["h"] | 6;
       schedules[numSchedules].minute = s["m"] | 0;
       schedules[numSchedules].durationMin = s["dur"] | 15;
+      schedules[numSchedules].target = s["tgt"] | 0; // 0=Water, 1=Fert, 2=Both
       schedules[numSchedules].ranToday = false;
       numSchedules++;
       saveSchedulesToNVS();
-      Serial.printf("[COMMAND] Added schedule slot %d: %02d:%02d (%d min)\n",
+      Serial.printf("[COMMAND] Added schedule slot %d: %02d:%02d (%d min, target %d)\n",
                     numSchedules, schedules[numSchedules-1].hour,
-                    schedules[numSchedules-1].minute, schedules[numSchedules-1].durationMin);
+                    schedules[numSchedules-1].minute, schedules[numSchedules-1].durationMin,
+                    schedules[numSchedules-1].target);
     }
   }
 
@@ -681,8 +745,8 @@ void setup() {
   pinMode(PIN_RELAY_PUMP, OUTPUT);
   pinMode(PIN_RELAY_VALVE, OUTPUT);
 
-  setPump(false, "System Boot");
-  setValve(false);
+  setWaterPump(false, "System Boot");
+  setFertPump(false, "System Boot");
 
   // Load Saved WiFi & Schedules from Flash Memory
   loadCredentials();
@@ -770,11 +834,12 @@ void loop() {
       publishTelemetry();
     }
 
-    Serial.printf("[%s] WiFi:%s | Soil:%d%% | Water:%d%%(%.1fcm) | Rain:%s(lock:%us) | Pump:%s | Mode:%d | Next:%s\n",
+    Serial.printf("[%s] WiFi:%s | Soil:%d%% | Water:%d%%(%.1fcm) | Rain:%s(lock:%us) | Motor1(Water):%s | Motor2(Fert):%s | Mode:%d | Next:%s\n",
                   currentTimeStr,
                   (WiFi.status() == WL_CONNECTED) ? "OK" : "NO",
                   soilPercent, waterTankPercent, waterDistCm,
                   instantRain ? "WET" : "DRY", rainRemainingSec,
-                  pumpActive ? "ON" : "OFF", (int)currentMode, nextRunString);
+                  pumpWaterActive ? "ON" : "OFF", pumpFertActive ? "ON" : "OFF",
+                  (int)currentMode, nextRunString);
   }
 }

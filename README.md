@@ -1,12 +1,13 @@
 # Drop2Crop 🌾💧
-### Precision Cloud IoT Irrigation & Fertigation Station
+### Dual-Motor Precision Cloud IoT Irrigation & Fertigation Station
 
 [![ESP32-S3](https://img.shields.io/badge/Hardware-ESP32--S3-blue.svg?logo=espressif)](https://www.espressif.com/)
 [![GitHub Pages](https://img.shields.io/badge/Live_Dashboard-GitHub_Pages-brightgreen.svg?logo=github)](https://fahimashabb.github.io/drop2crop/)
+[![Dual Motors](https://img.shields.io/badge/Actuators-Water%20%2B%20Fertigation-emerald.svg)](https://fahimashabb.github.io/drop2crop/)
 [![MQTT](https://img.shields.io/badge/Protocol-MQTT%20over%20WSS-orange.svg)](https://mosquitto.org/)
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
-> **Drop2Crop** is a commercial-grade, zero-cost cloud irrigation system designed for precision agriculture in Bangladesh. It connects an **ESP32-S3** microcontroller in the field to a real-time, high-speed single-page web dashboard hosted on **GitHub Pages**, allowing farmers and operators to monitor soil moisture, reservoir levels, and rain status from anywhere in the country with sub-second latency.
+> **Drop2Crop** is a commercial-grade, zero-cost cloud irrigation and fertigation system designed for precision agriculture in Bangladesh. It connects an **ESP32-S3** microcontroller in the field to a real-time, high-speed single-page web dashboard hosted on **GitHub Pages**, allowing farmers and operators to independently manage clean water irrigation and fertilizer dosing, monitor soil moisture, reservoir levels, and rain status from anywhere in the country with sub-second latency.
 
 ---
 
@@ -21,9 +22,9 @@ Comprehensive, print-ready technical manuals are included in this repository:
 
 | Manual Document | Description | Format |
 |---|---|---|
-| 📖 [**Drop2Crop User Manual**](docs/Drop2Crop_User_Manual.pdf) | Complete operational guide, mode selection, multi-timer scheduler, cloud dashboard controls, and troubleshooting. | `PDF (Printable)` |
-| ⚡ [**Drop2Crop Wiring Diagram & Manual**](docs/Drop2Crop_Wiring_Diagram.pdf) | Full electrical schematic, breadboard rail distribution, 5V/12V isolation, and complete pinout tables. | `PDF (Printable)` |
-| 🖼️ [**Master Wiring Schematic Graphic**](docs/drop2crop_wiring_schematic.png) | High-resolution color-coded visual wiring schematic. | `PNG (300 DPI)` |
+| 📖 [**Drop2Crop User Manual**](docs/Drop2Crop_User_Manual.pdf) | Complete operational guide, mode selection, dual-motor controls, target-based scheduling, and troubleshooting. | `PDF (Printable)` |
+| ⚡ [**Drop2Crop Wiring Diagram & Manual**](docs/Drop2Crop_Wiring_Diagram.pdf) | Full dual-motor electrical schematic, breadboard rail distribution, 5V/12V isolation, and complete pinout tables. | `PDF (Printable)` |
+| 🖼️ [**Master Wiring Schematic Graphic**](docs/drop2crop_wiring_schematic.png) | High-resolution color-coded visual wiring schematic for two 12V motors and all sensors. | `PNG (300 DPI)` |
 
 ---
 
@@ -48,22 +49,38 @@ Comprehensive, print-ready technical manuals are included in this repository:
 | | ECHO | `GPIO 8` | Input | Ultrasonic receiver pulse return width |
 | **5V 2-Channel Relay** | VCC | `5V / VIN` | 5.0V DC | Powers coil circuitry (Breadboard 5V rail) |
 | | GND | `GND` | 0V | Common logic ground bus |
-| | IN1 | `GPIO 9` | Active LOW | Relay Channel 1: 12V Water Pump actuation |
-| | IN2 | `GPIO 10` | Active LOW | Relay Channel 2: Aux / Fertigation solenoid |
+| | IN1 | `GPIO 9` | Active LOW | Relay Channel 1: **Motor 1 (Clean Water Pump)** |
+| | IN2 | `GPIO 10` | Active LOW | Relay Channel 2: **Motor 2 (Fertigation Pump)** |
+| **Motor 1: Clean Water** | (+) Red | Relay 1 `NO1` | +12V Switched | Switched from 12V+ via Relay 1 COM1 |
+| | (-) Black | 12V Adapter (-) | 0V (12V Ret) | Direct connection to 12V DC power supply ground |
+| **Motor 2: Fertigation** | (+) Red | Relay 2 `NO2` | +12V Switched | Switched from 12V+ via Relay 2 COM2 |
+| | (-) Black | 12V Adapter (-) | 0V (12V Ret) | Direct connection to 12V DC power supply ground |
 | **Physical Onboard** | BOOT Button | `GPIO 0` | Active LOW | **Hold for 3 seconds** to force WiFi Captive Portal |
 
 ---
 
-## ⚡ Power Supply & Electrical Isolation Architecture
-To prevent inductive noise, electromagnetic interference (EMI), and voltage spikes from the water pump resetting the ESP32:
+## ⚡ Power Supply & Dual-Motor Isolation Architecture
+To prevent inductive noise, electromagnetic interference (EMI), and back-EMF spikes from two high-power motors resetting the ESP32:
 
 1. **Logic & Microcontroller Supply (5V):**
    - A standard **5V mobile phone charger (2A)** powers the ESP32-S3 via its USB-C port or by connecting +5V and GND directly to the breadboard power rails.
    - The ESP32 internal regulator steps 5V down to 3.3V on the `3V3` pin for the sensitive analog sensors.
-2. **Actuator & Pump Supply (12V):**
-   - The **12V Water Pump** is powered by an independent **12V Universal Power Adapter**.
-   - **Galvanic Isolation:** The 12V positive (+) wire routes through Relay 1 `COM` (Common) and exits through `NO` (Normally Open) to the pump. The 12V negative (-) wire connects directly to the pump.
-   - ⚠️ **NEVER connect the 12V supply to the ESP32 or breadboard logic rails.**
+2. **Dual 12V Actuator Supply (12V):**
+   - Both **Motor 1 (Water Pump)** and **Motor 2 (Fertigation Pump)** are powered by an independent **12V Universal Power Adapter (2A - 5A)**.
+   - **Galvanic Isolation:** The 12V positive (+) wire splits and connects to both Relay 1 `COM1` and Relay 2 `COM2`.
+   - Relay 1 `NO1` (Normally Open) routes to Motor 1 (+) Red.
+   - Relay 2 `NO2` (Normally Open) routes to Motor 2 (+) Red.
+   - Both motors connect their (-) Black return wires directly to the 12V adapter (-) wire.
+   - ⚠️ **NEVER connect the 12V supply to the ESP32 pins or breadboard 5V logic rails.**
+
+---
+
+## 🧪 Dual-Motor System: Irrigation vs. Fertigation
+Drop2Crop features specialized multi-actuator logic:
+- **Motor 1 (Clean Water):** Dedicated to primary hydration. Operates in Auto Mode when soil moisture < 35%, in Scheduled cycles, and on manual command.
+- **Motor 2 (Fertigation):** Dedicated to fertilizer-mixed or nutrient-enriched water from a separate reservoir, preventing chemical contamination of the fresh water tank.
+- **Targeted Scheduling:** Set distinct daily timers for clean water (e.g. daily 6:00 AM) and fertilizer dosing (e.g. Wednesday 8:00 AM).
+- **Synchronous Override:** Start both motors together or stop all motors instantly with a single touch.
 
 ---
 
@@ -80,15 +97,19 @@ If you move your Drop2Crop system to another location (e.g. from Rajshahi to Chi
 4. **Select Network & Save:**
    - The device automatically scans and displays all nearby 2.4 GHz networks.
    - Tap your network, enter the password, and click **Save & Connect**.
-5. The ESP32 saves the credentials permanently in **Flash NVS** memory, reconnects to the cloud, synchronizes NTP time, and resumes autonomous irrigation.
+5. The ESP32 saves the credentials permanently in **Flash NVS** memory, reconnects to the cloud, synchronizes NTP time, and resumes autonomous operation.
 
 > 💡 **Important:** The ESP32-S3 operates exclusively on **2.4 GHz Wi-Fi**. Always connect to a 2.4 GHz SSID.
 
 ---
 
-## ⏰ Multi-Schedule Irrigation Engine
+## ⏰ Multi-Schedule Irrigation & Fertigation Engine
 Drop2Crop features an onboard, clock-driven scheduling engine synchronized to **Bangladesh Standard Time (UTC+6)**:
 - **Up to 10 Daily Slots:** Add, enable, disable, or delete timer slots directly from the cloud web dashboard.
+- **Actuator Target Selection:** Each schedule can be independently assigned to:
+  - 💧 **Watering Only** (Clean Water Pump)
+  - 🧪 **Fertigation Only** (Nutrient Pump)
+  - 🌊 **Both Motors** (Synchronous Operation)
 - **Custom Times & Durations:** Set precise start times (e.g. `06:00 AM` for 20 minutes, `06:00 PM` for 40 minutes).
 - **Flash Memory Persistence:** Schedules survive power outages and restarts.
 - **Autonomous Local Execution:** Even if your farm's internet connection drops, the ESP32 internal clock continues to execute all scheduled watering cycles on time.
@@ -98,7 +119,7 @@ Drop2Crop features an onboard, clock-driven scheduling engine synchronized to **
 
 ## 🌧️ 24-Hour Rain Lockout Protection
 - When precipitation is detected on the rain sensor, the system immediately engages a **24-Hour (86,400-second) Lockout Cycle**.
-- During this window, all automatic soil watering and timer cycles are locked out to prevent waterlogging and fungal infection.
+- During this window, all automatic soil watering and scheduled cycles (both water and fertigation) are locked out to prevent waterlogging and nutrient runoff.
 - The web app displays a live countdown timer. A manual **"Override Lockout"** button is available if needed.
 
 ---
@@ -106,7 +127,7 @@ Drop2Crop features an onboard, clock-driven scheduling engine synchronized to **
 ## 🚰 Ultrasonic Reservoir Level & Dry-Run Protection
 - An ultrasonic transducer on top of the water tank measures water distance and calculates tank capacity (0% to 100%).
 - **Low Water Warning (< 20%):** Web dashboard displays an amber warning alert to refill the reservoir.
-- **Dry-Run Motor Protection (< 15%):** The firmware immediately cuts power to the pump relay to prevent impeller cavitation and motor burnout.
+- **Dry-Run Motor Protection (< 15%):** The firmware immediately cuts power to **both relays** to prevent impeller cavitation and motor burnout.
 
 ---
 
@@ -114,15 +135,15 @@ Drop2Crop features an onboard, clock-driven scheduling engine synchronized to **
 
 | Mode | Name | Description |
 |:---:|---|---|
-| **0** | **Smart Auto (Soil + Rain)** | Full autonomous closed-loop irrigation. Pumps when soil < 35%, stops at 70%. Subject to 24h rain lock and reservoir safety. |
-| **1** | **Alert-Only Monitor** | Sends visual/audio alerts when soil < 35% without starting the pump. Farmer manually controls irrigation. |
-| **2** | **Multi-Timer Schedule** | Irrigates strictly according to scheduled clock slots. Protected by rain lockout and dry-run safety. |
-| **3** | **Manual Cloud Override** | Direct on-demand pump control from the cloud dashboard. |
+| **0** | **Smart Auto (Soil + Rain)** | Full autonomous closed-loop irrigation. Pumps Clean Water when soil < 35%, stops at 70%. Subject to 24h rain lock and reservoir safety. |
+| **1** | **Alert-Only Monitor** | Sends visual/audio alerts when soil < 35% without starting pumps. Farmer manually triggers Water or Fertigation. |
+| **2** | **Multi-Timer Schedule** | Irrigates strictly according to scheduled clock slots with target selection (Water, Fertigation, or Both). |
+| **3** | **Manual Cloud Override** | Direct on-demand control from the dashboard: Clean Water, Fertigation, Both Motors, or Stop All. |
 
 ---
 
 ## 🔐 Station Security & Access Control
-To protect against unauthorized access and prevent anyone from controlling your irrigation motor:
+To protect against unauthorized access and prevent anyone from controlling your irrigation motors:
 - **Web Lockscreen Authentication:** When visiting the dashboard, an authentication lockscreen blocks unauthorized users from viewing controls or triggering actuators.
 - **Hardware-Enforced Command Verification:** The ESP32-S3 firmware verifies an `"auth"` security token on every incoming command packet. If an unauthorized entity sends an MQTT command to your topic, the ESP32 firmware rejects it immediately (`[SECURITY ALERT] Unauthorized command rejected!`).
 - **Default Factory PIN:** **`2564`** *(last 4 digits of device ID `drop2crop_2884858a2564`)*.
@@ -153,8 +174,8 @@ How to verify that your ESP32 is working properly when powered on:
    - Once connected to your Wi-Fi, open **[Drop2Crop Web Dashboard](https://fahimashabb.github.io/drop2crop/)**.
    - The status pill will flip to a pulsing green **"Device Online"** badge, and sensor readings (soil moisture & water reservoir level) will stream in real time every 2 seconds.
 4. **⚡ Relay Mechanical Click Test:**
-   - On the web app, select **Mode 3 (Manual Cloud Override)** and click **"Start Pump"**.
-   - You will hear an audible physical **"CLICK"** from the blue relay cube, and the channel 1 LED on the relay module will light up.
+   - On the web app, select **Mode 3 (Manual Cloud Override)** and click **"Start Water Pump"** or **"Start Fert Pump"**.
+   - You will hear an audible physical **"CLICK"** from the corresponding blue relay cube, and its red channel indicator LED will light up.
 
 ---
 

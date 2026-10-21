@@ -439,23 +439,67 @@
         </div>
       </div>
 
-      <!-- Master Pump Actuator Switch -->
-      <div class="pt-6 border-t border-slate-700/60 flex flex-col sm:flex-row items-center justify-between gap-6">
-        <div>
-          <div class="text-lg font-bold font-display text-white flex items-center gap-2">
-            Irrigation Water Pump
-            <span id="pumpStatusPill" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-sans font-medium">STOPPED</span>
+      <!-- Dual-Motor Actuator Control Panel -->
+      <div class="pt-6 border-t border-slate-700/60 space-y-4">
+        <label class="block text-xs font-bold uppercase tracking-wider text-slate-400">Actuator Control · Dual 12V Motors</label>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Motor 1: Clean Water Irrigation Pump -->
+          <div class="p-5 rounded-2xl bg-slate-900/60 border border-slate-700/80 flex flex-col justify-between gap-4">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xl">💧</span>
+                  <div class="text-base font-bold font-display text-white">Motor 1: Clean Water</div>
+                </div>
+                <p class="text-xs text-slate-400 mt-1">
+                  Relay 1 (GPIO 9) · Feeds fresh reservoir water
+                </p>
+              </div>
+              <span id="pumpStatusPill" class="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 font-sans font-medium">STOPPED</span>
+            </div>
+
+            <button id="pumpToggleBtn" onclick="togglePumpAction()" class="w-full py-3.5 rounded-xl font-bold font-display text-sm transition-all duration-300 shadow-lg flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20 active:scale-95">
+              <span id="pumpBtnIcon">💧</span>
+              <span id="pumpBtnText">START WATER PUMP</span>
+            </button>
           </div>
-          <p class="text-xs text-slate-400 mt-1">
-            5V Relay Channel 1 (GPIO 9) — Triggers water flow & fertilizer through drip lines
-          </p>
+
+          <!-- Motor 2: Fertigation Nutrient Pump -->
+          <div class="p-5 rounded-2xl bg-slate-900/60 border border-slate-700/80 flex flex-col justify-between gap-4">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xl">🧪</span>
+                  <div class="text-base font-bold font-display text-white">Motor 2: Fertigation</div>
+                </div>
+                <p class="text-xs text-slate-400 mt-1">
+                  Relay 2 (GPIO 10) · Feeds fertilizer-mixed solution
+                </p>
+              </div>
+              <span id="fertStatusPill" class="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 font-sans font-medium">STOPPED</span>
+            </div>
+
+            <button id="fertToggleBtn" onclick="toggleFertAction()" class="w-full py-3.5 rounded-xl font-bold font-display text-sm transition-all duration-300 shadow-lg flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20 active:scale-95">
+              <span id="fertBtnIcon">🧪</span>
+              <span id="fertBtnText">START FERT PUMP</span>
+            </button>
+          </div>
         </div>
 
-        <div class="flex items-center gap-3">
-          <button id="pumpToggleBtn" onclick="togglePumpAction()" class="px-8 py-4 rounded-2xl font-bold font-display text-base transition-all duration-300 shadow-xl flex items-center gap-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20 active:scale-95">
-            <span class="text-xl" id="pumpBtnIcon">💧</span>
-            <span id="pumpBtnText">START PUMP</span>
-          </button>
+        <!-- Master Dual-Run Quick Trigger -->
+        <div class="flex items-center justify-between p-3 rounded-xl bg-slate-950/40 border border-slate-800 text-xs">
+          <span class="text-slate-400 flex items-center gap-1.5">
+            <span>⚡</span> Synchronous Actions:
+          </span>
+          <div class="flex gap-2">
+            <button onclick="sendBothMotorsCommand('on')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 font-semibold transition">
+              Start Both Motors
+            </button>
+            <button onclick="sendBothMotorsCommand('off')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-rose-400 border border-slate-700 font-semibold transition">
+              Stop All Motors
+            </button>
+          </div>
         </div>
       </div>
 
@@ -533,6 +577,28 @@
             <button type="button" onclick="setDurPreset(20)" class="flex-1 py-1 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 text-[11px]">20m</button>
             <button type="button" onclick="setDurPreset(40)" class="flex-1 py-1 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 text-[11px]">40m</button>
             <button type="button" onclick="setDurPreset(60)" class="flex-1 py-1 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 text-[11px]">1 hour</button>
+          </div>
+        </div>
+
+        <!-- Target Motor Assignment -->
+        <div>
+          <label class="block text-slate-400 mb-1.5 font-medium">Motor Channel Assignment</label>
+          <div class="grid grid-cols-3 gap-2">
+            <label class="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700/60 cursor-pointer text-center transition">
+              <input type="radio" name="schedTargetRadio" value="0" class="mb-1 text-emerald-500 focus:ring-0" checked>
+              <span class="text-xs font-bold text-emerald-400 flex items-center gap-1">💧 Water</span>
+              <span class="text-[10px] text-slate-400">Motor 1 Only</span>
+            </label>
+            <label class="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700/60 cursor-pointer text-center transition">
+              <input type="radio" name="schedTargetRadio" value="1" class="mb-1 text-amber-500 focus:ring-0">
+              <span class="text-xs font-bold text-amber-400 flex items-center gap-1">🧪 Fert</span>
+              <span class="text-[10px] text-slate-400">Motor 2 Only</span>
+            </label>
+            <label class="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700/60 cursor-pointer text-center transition">
+              <input type="radio" name="schedTargetRadio" value="2" class="mb-1 text-sky-500 focus:ring-0">
+              <span class="text-xs font-bold text-sky-400 flex items-center gap-1">🌊 Both</span>
+              <span class="text-[10px] text-slate-400">Dual Motors</span>
+            </label>
           </div>
         </div>
       </div>
@@ -831,6 +897,7 @@
     let soundEnabled = true;
     let lastAlertSoundTime = 0;
     let currentPumpState = false;
+    let currentFertState = false;
     let currentMode = 0;
     let isRainLocked = false;
     let activeSchedules = [];
@@ -918,6 +985,8 @@
       const h = parseInt(document.getElementById('schedHour').value);
       const m = parseInt(document.getElementById('schedMin').value);
       const dur = parseInt(document.getElementById('schedDur').value);
+      const targetRadio = document.querySelector('input[name="schedTargetRadio"]:checked');
+      const target = targetRadio ? parseInt(targetRadio.value) : 0;
 
       if (isNaN(dur) || dur <= 0) {
         alert('Please enter a valid run duration in minutes!');
@@ -926,10 +995,11 @@
 
       const payload = JSON.stringify({
         auth: STATION_PIN,
-        addSched: { h: h, m: m, dur: dur }
+        addSched: { h: h, m: m, dur: dur, tgt: target }
       });
       client.publish(TOPIC_COMMAND, payload);
-      logTerm(`Tx -> Add Schedule: ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')} for ${dur}m`);
+      const targetLabels = ['Motor 1 (Water)', 'Motor 2 (Fertigation)', 'Both Motors'];
+      logTerm(`Tx -> Add Schedule: ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')} for ${dur}m [${targetLabels[target]}]`);
       closeAddScheduleModal();
     }
 
@@ -1222,16 +1292,20 @@
       currentMode = data.mode ?? 0;
       updateModeButtons(currentMode);
 
-      // 6. Pump Actuator State
+      // 6. Dual-Motor Actuator States
       currentPumpState = data.pump ?? false;
-      updatePumpButton(currentPumpState, data.schedRun);
+      currentFertState = data.fert ?? false;
+      const isSchedWater = data.schedRun && (data.schedTgt === 0 || data.schedTgt === 2);
+      const isSchedFert  = data.schedRun && (data.schedTgt === 1 || data.schedTgt === 2);
+      updatePumpButton(currentPumpState, isSchedWater);
+      updateFertButton(currentFertState, isSchedFert);
 
       // Safety Notice Check
       const notice = document.getElementById('safetyNotice');
       const noticeText = document.getElementById('safetyNoticeText');
       if (waterVal < 15) {
         notice.classList.remove('hidden');
-        noticeText.innerText = 'Dry-Run Protection Active: Water reservoir is below 15%. Pump is locked to protect motor.';
+        noticeText.innerText = 'Dry-Run Protection Active: Water reservoir is below 15%. Both motors are locked to protect pumps.';
       } else if (isRainLocked && (currentMode === 0 || currentMode === 1)) {
         notice.classList.remove('hidden');
         noticeText.innerText = 'Rain Delay Active: 24-hour lockout in progress. Automated & scheduled irrigation paused.';
@@ -1256,6 +1330,13 @@
         const displayHr = s.h % 12 === 0 ? 12 : s.h % 12;
         const timeFormatted = `${displayHr.toString().padStart(2, '0')}:${s.m.toString().padStart(2, '0')} ${ampm}`;
 
+        let targetBadge = '<span class="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">💧 Water</span>';
+        if (s.tgt === 1) {
+          targetBadge = '<span class="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">🧪 Fertigation</span>';
+        } else if (s.tgt === 2) {
+          targetBadge = '<span class="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-sky-500/15 text-sky-400 border border-sky-500/30">🌊 Both</span>';
+        }
+
         const card = document.createElement('div');
         card.className = `p-4 rounded-xl border transition flex items-center justify-between gap-3 ${
           s.en 
@@ -1271,7 +1352,10 @@
               ${s.en ? '✓' : '—'}
             </button>
             <div>
-              <div class="text-base font-bold font-display text-white tracking-tight">${timeFormatted}</div>
+              <div class="flex items-center gap-2">
+                <div class="text-base font-bold font-display text-white tracking-tight">${timeFormatted}</div>
+                ${targetBadge}
+              </div>
               <div class="text-[11px] text-slate-400 font-mono">Runs for <span class="text-emerald-400 font-semibold">${s.dur} mins</span></div>
             </div>
           </div>
@@ -1305,19 +1389,42 @@
       const btnIcon = document.getElementById('pumpBtnIcon');
 
       if (isOn) {
-        pill.className = 'text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-sans font-semibold animate-pulse';
-        pill.innerText = isScheduled ? 'TIMER ACTIVE ⏱️' : 'RUNNING 🌊';
+        pill.className = 'text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-sans font-semibold animate-pulse';
+        pill.innerText = isScheduled ? 'TIMER ACTIVE ⏱️' : 'PUMPING 🌊';
 
-        btn.className = 'px-8 py-4 rounded-2xl font-bold font-display text-base transition-all duration-300 shadow-xl flex items-center gap-3 bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 active:scale-95';
-        btnText.innerText = 'STOP PUMP';
+        btn.className = 'w-full py-3.5 rounded-xl font-bold font-display text-sm transition-all duration-300 shadow-lg flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 active:scale-95';
+        btnText.innerText = 'STOP WATER PUMP';
         btnIcon.innerText = '🛑';
       } else {
-        pill.className = 'text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-sans font-medium';
-        pill.innerText = 'IDLE / OFF';
+        pill.className = 'text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 font-sans font-medium';
+        pill.innerText = 'STOPPED';
 
-        btn.className = 'px-8 py-4 rounded-2xl font-bold font-display text-base transition-all duration-300 shadow-xl flex items-center gap-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20 active:scale-95';
-        btnText.innerText = 'START PUMP';
+        btn.className = 'w-full py-3.5 rounded-xl font-bold font-display text-sm transition-all duration-300 shadow-lg flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20 active:scale-95';
+        btnText.innerText = 'START WATER PUMP';
         btnIcon.innerText = '💧';
+      }
+    }
+
+    function updateFertButton(isOn, isScheduled) {
+      const pill = document.getElementById('fertStatusPill');
+      const btn = document.getElementById('fertToggleBtn');
+      const btnText = document.getElementById('fertBtnText');
+      const btnIcon = document.getElementById('fertBtnIcon');
+
+      if (isOn) {
+        pill.className = 'text-xs px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-sans font-semibold animate-pulse';
+        pill.innerText = isScheduled ? 'TIMER ACTIVE ⏱️' : 'FERTIGATING 🧪';
+
+        btn.className = 'w-full py-3.5 rounded-xl font-bold font-display text-sm transition-all duration-300 shadow-lg flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 active:scale-95';
+        btnText.innerText = 'STOP FERT PUMP';
+        btnIcon.innerText = '🛑';
+      } else {
+        pill.className = 'text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 font-sans font-medium';
+        pill.innerText = 'STOPPED';
+
+        btn.className = 'w-full py-3.5 rounded-xl font-bold font-display text-sm transition-all duration-300 shadow-lg flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20 active:scale-95';
+        btnText.innerText = 'START FERT PUMP';
+        btnIcon.innerText = '🧪';
       }
     }
 
@@ -1333,11 +1440,43 @@
       }
       const payload = JSON.stringify({ auth: STATION_PIN, pump: state });
       client.publish(TOPIC_COMMAND, payload);
-      logTerm(`Tx -> Pump: ${state}`);
+      logTerm(`Tx -> Motor 1 (Water): ${state}`);
+    }
+
+    function sendFertCommand(state) {
+      if (!client || !client.connected) {
+        alert('Cannot send command: Cloud broker is disconnected!');
+        return;
+      }
+      if (!isDeviceOnline) {
+        alert('⚠️ Cannot execute command: The device is not online!\n\nThe ESP32 controller is currently turned off or disconnected from power. Please plug in the 5V charger and ensure the device is connected to Wi-Fi.');
+        return;
+      }
+      const payload = JSON.stringify({ auth: STATION_PIN, fert: state });
+      client.publish(TOPIC_COMMAND, payload);
+      logTerm(`Tx -> Motor 2 (Fertigation): ${state}`);
+    }
+
+    function sendBothMotorsCommand(state) {
+      if (!client || !client.connected) {
+        alert('Cannot send command: Cloud broker is disconnected!');
+        return;
+      }
+      if (!isDeviceOnline) {
+        alert('⚠️ Cannot execute command: The device is not online!');
+        return;
+      }
+      const payload = JSON.stringify({ auth: STATION_PIN, both: state });
+      client.publish(TOPIC_COMMAND, payload);
+      logTerm(`Tx -> Both Motors: ${state}`);
     }
 
     function togglePumpAction() {
       sendPumpCommand(currentPumpState ? 'off' : 'on');
+    }
+
+    function toggleFertAction() {
+      sendFertCommand(currentFertState ? 'off' : 'on');
     }
 
     function sendModeCommand(modeIndex) {
