@@ -131,6 +131,16 @@ Drop2Crop features an onboard, clock-driven scheduling engine synchronized to **
 
 ---
 
+## 🛡️ PIN-Protected Safety Mechanism Bypass & Force Mode
+For workbench testing, initial installation, pipe maintenance, or emergency watering:
+- **Default Protection (Enforced):** The system automatically cuts power to both pumps if the reservoir is below 15% or a 24h rain delay is active.
+- **PIN-Secured Bypass Setting:** You can turn the safety mechanism OFF directly from the Actuator Panel or Settings (⚙️).
+- **Authentication Required:** Toggling safety ON or OFF requires entering your **Station Security PIN (default `2564`)**, ensuring no unauthorized user or accidental click can disable protection.
+- **Force Mode:** When safety is turned OFF, the dashboard activates **Force Mode**, allowing you to forcefully turn ON or OFF **Motor 1 (Clean Water)**, **Motor 2 (Fertigation)**, or **Both Motors** regardless of sensor readings.
+- **Flash NVS Persistence:** The safety state is permanently preserved in ESP32 Non-Volatile Storage (NVS) across power resets.
+
+---
+
 ## 🎛️ Operational Modes
 
 | Mode | Name | Description |

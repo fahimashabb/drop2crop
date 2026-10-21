@@ -503,6 +503,31 @@
         </div>
       </div>
 
+      <!-- Hardware Safety Interlock & Force Mode Panel -->
+      <div id="safetyControlCard" class="p-4 rounded-2xl border transition-all duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60 border-slate-700/80">
+        <div class="flex items-start gap-3">
+          <div id="safetyShieldIcon" class="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center text-xl shrink-0">
+            🛡️
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-bold font-display text-white">Hardware Safety Mechanism</span>
+              <span id="safetyStatePill" class="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                PROTECTION ENFORCED
+              </span>
+            </div>
+            <p id="safetyDescText" class="text-xs text-slate-400 mt-0.5 leading-relaxed">
+              Protects motors from dry-run cavitation (&lt; 15% reservoir) and 24h rain delays. Requires PIN to bypass.
+            </p>
+          </div>
+        </div>
+
+        <button id="toggleSafetyBtn" onclick="openSafetyAuthModal()" class="px-4 py-2.5 rounded-xl font-bold font-display text-xs transition-all duration-200 border flex items-center justify-center gap-2 shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600 active:scale-95 shadow-md">
+          <span id="toggleSafetyIcon">🔓</span>
+          <span id="toggleSafetyText">Disable Safety (Force Mode)</span>
+        </button>
+      </div>
+
       <!-- Safety Interlock Warning Notice -->
       <div id="safetyNotice" class="hidden text-xs text-rose-400 bg-rose-950/40 border border-rose-500/30 p-3 rounded-xl flex items-center gap-2">
         <span>⚠️</span>
@@ -660,6 +685,23 @@
             <span>💾</span> Save New PIN to ESP32 & Browser
           </button>
         </div>
+
+        <!-- Hardware Safety Interlock in Settings -->
+        <div class="border-t border-slate-800 pt-3 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-200 text-xs flex items-center gap-1.5 uppercase tracking-wider">
+              <span>🛡️</span> Hardware Safety Mechanism
+            </span>
+            <span id="cfgSafetyStatusBadge" class="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">ENFORCED</span>
+          </div>
+          <p class="text-[11px] text-slate-400 leading-relaxed">
+            Enforces reservoir dry-run cutoff (&lt; 15%) and 24h rain lockout. Can be bypassed with your Station PIN to forcefully operate Motor 1 & Motor 2.
+          </p>
+          <button type="button" onclick="toggleConfigModal(); openSafetyAuthModal();" class="w-full py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-400 transition flex items-center justify-center gap-1.5">
+            <span>⚡</span> Configure Force Mode / Safety (PIN Required)
+          </button>
+        </div>
+
       </div>
 
       <div class="flex justify-end gap-2 pt-2">
@@ -732,6 +774,48 @@
       </div>
     </div>
   </div>
+
+  <!-- SECURITY PIN MODAL FOR SAFETY MECHANISM TOGGLE -->
+  <div id="safetyPinModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md hidden transition-all duration-300">
+    <div class="glass-card max-w-sm w-full p-6 rounded-3xl border border-slate-700/80 bg-slate-900/95 shadow-2xl text-center space-y-4">
+      <div id="safetyModalIconBg" class="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center text-2xl mx-auto">
+        🔐
+      </div>
+
+      <div>
+        <h3 id="safetyModalTitle" class="text-base font-bold font-display text-white">Security Authorization</h3>
+        <p id="safetyModalSubtitle" class="text-xs text-slate-400 mt-1 leading-relaxed">
+          Enter your 4-digit Station Security PIN to configure the safety mechanism:
+        </p>
+      </div>
+
+      <!-- PIN Input -->
+      <div class="relative max-w-xs mx-auto">
+        <input type="password" id="safetyPinInput" maxlength="16" placeholder="Enter Station PIN"
+               class="w-full text-center tracking-[0.3em] font-mono text-xl py-3 px-4 rounded-xl bg-slate-950 border border-slate-700 text-white focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 transition">
+        <button type="button" onclick="toggleSafetyPinVisibility()" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-sm" title="Show / Hide PIN">
+          <span id="safetyPinEyeIcon">👁️</span>
+        </button>
+      </div>
+
+      <!-- Error message container -->
+      <div id="safetyPinErrorMsg" class="hidden text-xs text-rose-300 font-semibold bg-rose-500/20 border border-rose-500/40 rounded-xl py-2 px-3 animate-pulse">
+        Incorrect PIN! Please try again.
+      </div>
+
+      <!-- Actions -->
+      <div class="flex gap-2 pt-2">
+        <button type="button" onclick="closeSafetyAuthModal()" class="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+          Cancel
+        </button>
+        <button type="button" id="safetyConfirmBtn" onclick="submitSafetyPinAuth()" class="flex-1 py-2.5 rounded-xl text-xs font-bold font-display bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/20 transition">
+          Authorize
+        </button>
+      </div>
+    </div>
+  </div>
+
+
 
   <!-- APPLICATION LOGIC & MQTT CLIENT -->
   <script>
@@ -898,6 +982,7 @@
     let lastAlertSoundTime = 0;
     let currentPumpState = false;
     let currentFertState = false;
+    let currentSafetyBypass = false;
     let currentMode = 0;
     let isRainLocked = false;
     let activeSchedules = [];
@@ -1292,6 +1377,11 @@
       currentMode = data.mode ?? 0;
       updateModeButtons(currentMode);
 
+            if (data.safeBypass !== undefined) {
+        currentSafetyBypass = data.safeBypass;
+        updateSafetyUI(currentSafetyBypass);
+      }
+
       // 6. Dual-Motor Actuator States
       currentPumpState = data.pump ?? false;
       currentFertState = data.fert ?? false;
@@ -1303,12 +1393,18 @@
       // Safety Notice Check
       const notice = document.getElementById('safetyNotice');
       const noticeText = document.getElementById('safetyNoticeText');
-      if (waterVal < 15) {
+      if (currentSafetyBypass) {
         notice.classList.remove('hidden');
-        noticeText.innerText = 'Dry-Run Protection Active: Water reservoir is below 15%. Both motors are locked to protect pumps.';
+        notice.className = 'text-xs text-amber-300 bg-amber-950/40 border border-amber-500/40 p-3 rounded-xl flex items-center justify-between gap-2';
+        noticeText.innerHTML = '<span class="flex items-center gap-2"><span>⚠️</span> <span><strong>FORCE MODE ACTIVE:</strong> Safety mechanism is turned OFF. Dry-run cutoff and rain lockout are bypassed. Motors can be operated forcefully.</span></span>';
+      } else if (waterVal < 15) {
+        notice.classList.remove('hidden');
+        notice.className = 'text-xs text-rose-400 bg-rose-950/40 border border-rose-500/30 p-3 rounded-xl flex items-center justify-between gap-2';
+        noticeText.innerHTML = '<span class="flex items-center gap-2"><span>🛑</span> <span><strong>Dry-Run Protection Active:</strong> Reservoir is below 15%. Both motors are locked to protect pumps. (Turn off safety with PIN to force run).</span></span>';
       } else if (isRainLocked && (currentMode === 0 || currentMode === 1)) {
         notice.classList.remove('hidden');
-        noticeText.innerText = 'Rain Delay Active: 24-hour lockout in progress. Automated & scheduled irrigation paused.';
+        notice.className = 'text-xs text-rose-400 bg-rose-950/40 border border-rose-500/30 p-3 rounded-xl flex items-center justify-between gap-2';
+        noticeText.innerHTML = '<span class="flex items-center gap-2"><span>🌧️</span> <span><strong>Rain Delay Active:</strong> 24-hour lockout in progress. Automated & scheduled irrigation paused.</span></span>';
       } else {
         notice.classList.add('hidden');
       }
@@ -1512,6 +1608,138 @@
         }
       });
     });
+  
+    // ==================== SAFETY MECHANISM & FORCE MODE ====================
+    function openSafetyAuthModal() {
+      const isCurrentlyBypassed = currentSafetyBypass;
+      document.getElementById('safetyModalTitle').innerText = isCurrentlyBypassed 
+        ? "Enable Safety Protection" 
+        : "Disable Safety Mechanism";
+        
+      document.getElementById('safetyModalSubtitle').innerHTML = isCurrentlyBypassed
+        ? "Enter your <b>Station Security PIN</b> to restore dry-run and rain safety protection:"
+        : "Enter your <b>Station Security PIN</b> to turn off the safety mechanism and allow forcefully turning motors ON/OFF:";
+        
+      document.getElementById('safetyConfirmBtn').innerText = isCurrentlyBypassed
+        ? "Turn On Safety"
+        : "Turn Off Safety";
+        
+      document.getElementById('safetyPinInput').value = '';
+      document.getElementById('safetyPinErrorMsg').classList.add('hidden');
+      document.getElementById('safetyPinModal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('safetyPinInput')?.focus(), 150);
+    }
+
+    function closeSafetyAuthModal() {
+      document.getElementById('safetyPinModal').classList.add('hidden');
+    }
+
+    function toggleSafetyPinVisibility() {
+      const input = document.getElementById('safetyPinInput');
+      const icon = document.getElementById('safetyPinEyeIcon');
+      if (input.type === 'password') {
+        input.type = 'text';
+        icon.innerText = '🙈';
+      } else {
+        input.type = 'password';
+        icon.innerText = '👁️';
+      }
+    }
+
+    function submitSafetyPinAuth() {
+      const entered = document.getElementById('safetyPinInput').value.trim();
+      if (entered !== STATION_PIN) {
+        document.getElementById('safetyPinErrorMsg').classList.remove('hidden');
+        document.getElementById('safetyPinErrorMsg').innerText = "Incorrect PIN! Action rejected.";
+        playAudioChime('alert');
+        return;
+      }
+      
+      closeSafetyAuthModal();
+      const newBypassState = !currentSafetyBypass;
+      sendSafetyBypassCommand(newBypassState);
+    }
+
+    function sendSafetyBypassCommand(state) {
+      if (!client || !client.connected) {
+        alert('Cannot send command: Cloud broker is disconnected!');
+        return;
+      }
+      if (!isDeviceOnline) {
+        alert('Device is currently offline (turned off). Cannot modify safety settings.');
+        return;
+      }
+      const payload = JSON.stringify({ 
+        auth: STATION_PIN, 
+        setSafetyBypass: state 
+      });
+      client.publish(TOPIC_COMMAND, payload);
+      currentSafetyBypass = state;
+      updateSafetyUI(state);
+      logTerm(`Tx -> Safety Bypass: ${state ? 'ACTIVE (Force Mode Allowed)' : 'INACTIVE (Safeties Enforced)'}`);
+    }
+
+    function updateSafetyUI(bypassState) {
+      const card = document.getElementById('safetyControlCard');
+      const icon = document.getElementById('safetyShieldIcon');
+      const pill = document.getElementById('safetyStatePill');
+      const desc = document.getElementById('safetyDescText');
+      const btn  = document.getElementById('toggleSafetyBtn');
+      const btnIcon = document.getElementById('toggleSafetyIcon');
+      const btnText = document.getElementById('toggleSafetyText');
+      const cfgBadge = document.getElementById('cfgSafetyStatusBadge');
+      
+      if (bypassState) {
+        if (card) card.className = 'p-4 rounded-2xl border transition-all duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-950/20 border-amber-500/40 shadow-lg shadow-amber-950/20';
+        if (icon) {
+          icon.innerText = '⚠️';
+          icon.className = 'w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center text-xl shrink-0 animate-pulse';
+        }
+        if (pill) {
+          pill.innerText = 'FORCE MODE ACTIVE (SAFETY BYPASSED)';
+          pill.className = 'text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse';
+        }
+        if (desc) {
+          desc.innerText = 'Safety mechanism is turned OFF. Dry-run and rain cutoffs are suspended. You can forcefully turn ON or OFF Motor 1 & Motor 2.';
+        }
+        if (btn) {
+          btn.className = 'px-4 py-2.5 rounded-xl font-bold font-display text-xs transition-all duration-200 border flex items-center justify-center gap-2 shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500 active:scale-95 shadow-md shadow-emerald-600/30';
+        }
+        if (btnIcon) btnIcon.innerText = '🛡️';
+        if (btnText) btnText.innerText = 'Re-Enable Safety Protection';
+        if (cfgBadge) {
+          cfgBadge.innerText = 'BYPASSED';
+          cfgBadge.className = 'text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+        }
+      } else {
+        if (card) card.className = 'p-4 rounded-2xl border transition-all duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60 border-slate-700/80';
+        if (icon) {
+          icon.innerText = '🛡️';
+          icon.className = 'w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center text-xl shrink-0';
+        }
+        if (pill) {
+          pill.innerText = 'PROTECTION ENFORCED';
+          pill.className = 'text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
+        }
+        if (desc) {
+          desc.innerText = 'Protects motors from dry-run cavitation (< 15% reservoir) and 24h rain delays. Requires PIN to bypass.';
+        }
+        if (btn) {
+          btn.className = 'px-4 py-2.5 rounded-xl font-bold font-display text-xs transition-all duration-200 border flex items-center justify-center gap-2 shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600 active:scale-95 shadow-md';
+        }
+        if (btnIcon) btnIcon.innerText = '🔓';
+        if (btnText) btnText.innerText = 'Disable Safety (Force Mode)';
+        if (cfgBadge) {
+          cfgBadge.innerText = 'ENFORCED';
+          cfgBadge.className = 'text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
+        }
+      }
+    }
+
+    document.getElementById('safetyPinInput')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitSafetyPinAuth();
+    });
+
   </script>
 </body>
 </html>

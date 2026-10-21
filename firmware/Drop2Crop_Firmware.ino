@@ -115,6 +115,7 @@ int waterTankPercent = 0;
 
 bool pumpWaterActive = false; // Motor 1: Clean Water Irrigation Pump (Relay 1, GPIO 9)
 bool pumpFertActive  = false; // Motor 2: Fertigation Nutrient Pump (Relay 2, GPIO 10)
+bool safetyOverride  = false; // Safety Bypass: true = allow forcing motors ON/OFF regardless of water/rain
 
 // NTP Time variables (UTC+6 Bangladesh Standard Time)
 const long  GMT_OFFSET_SEC = 21600;
@@ -138,9 +139,11 @@ void loadCredentials() {
   wifiSSID = preferences.getString("ssid", "Dracarys");
   wifiPass = preferences.getString("pass", "itsanewform");
   devicePasscode = preferences.getString("pin", "2564");
+  safetyOverride = preferences.getBool("safeBypass", false);
   preferences.end();
   Serial.printf("[NVS] Loaded WiFi Config: SSID='%s'\n", wifiSSID.c_str());
   Serial.printf("[NVS] Station Security PIN configured: '%s'\n", devicePasscode.c_str());
+  Serial.printf("[NVS] Safety Mechanism: %s\n", safetyOverride ? "BYPASSED (Force Override Active)" : "ENFORCED (Safeties Active)");
 
   preferences.begin("d2c_sched", false);
   numSchedules = preferences.getInt("count", 0);
@@ -186,6 +189,15 @@ void savePasscode(const String& newPin) {
   preferences.end();
   devicePasscode = newPin;
   Serial.printf("[SECURITY] Security PIN updated in Flash NVS: %s\n", devicePasscode.c_str());
+}
+
+void saveSafetyOverride(bool bypass) {
+  safetyOverride = bypass;
+  preferences.begin("d2c_cfg", false);
+  preferences.putBool("safeBypass", safetyOverride);
+  preferences.end();
+  Serial.printf("[SAFETY] Safety Override updated in Flash NVS: %s\n", 
+                safetyOverride ? "BYPASSED (Force Override Active)" : "ENFORCED (Safeties Active)");
 }
 
 void saveSchedulesToNVS() {
@@ -301,15 +313,15 @@ void startCaptivePortal() {
 
 // ==================== ACTUATOR CONTROL (DUAL MOTOR) ====================
 void setWaterPump(bool state, const char* reason = "Manual") {
-  if (state && waterTankPercent < TANK_EMPTY_CUTOFF) {
-    Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: Tank < 15%% empty!\n", reason);
+  if (state && !safetyOverride && waterTankPercent < TANK_EMPTY_CUTOFF) {
+    Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: Tank < 15%% empty! (Safety Active)\n", reason);
     pumpWaterActive = false;
     digitalWrite(PIN_RELAY_PUMP, HIGH);
     return;
   }
 
-  if (state && rainLocked && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
-    Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: 24h Rain Lockout!\n", reason);
+  if (state && !safetyOverride && rainLocked && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
+    Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: 24h Rain Lockout! (Safety Active)\n", reason);
     pumpWaterActive = false;
     digitalWrite(PIN_RELAY_PUMP, HIGH);
     return;
@@ -317,19 +329,20 @@ void setWaterPump(bool state, const char* reason = "Manual") {
 
   pumpWaterActive = state;
   digitalWrite(PIN_RELAY_PUMP, pumpWaterActive ? LOW : HIGH);
-  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Trigger: %s)\n", pumpWaterActive ? "ON" : "OFF", reason);
+  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Trigger: %s%s)\n", 
+                pumpWaterActive ? "ON" : "OFF", reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
 }
 
 void setFertPump(bool state, const char* reason = "Manual") {
-  if (state && waterTankPercent < TANK_EMPTY_CUTOFF) {
-    Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: Tank < 15%% empty!\n", reason);
+  if (state && !safetyOverride && waterTankPercent < TANK_EMPTY_CUTOFF) {
+    Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: Tank < 15%% empty! (Safety Active)\n", reason);
     pumpFertActive = false;
     digitalWrite(PIN_RELAY_VALVE, HIGH);
     return;
   }
 
-  if (state && rainLocked && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
-    Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: 24h Rain Lockout!\n", reason);
+  if (state && !safetyOverride && rainLocked && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
+    Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: 24h Rain Lockout! (Safety Active)\n", reason);
     pumpFertActive = false;
     digitalWrite(PIN_RELAY_VALVE, HIGH);
     return;
@@ -337,7 +350,8 @@ void setFertPump(bool state, const char* reason = "Manual") {
 
   pumpFertActive = state;
   digitalWrite(PIN_RELAY_VALVE, pumpFertActive ? LOW : HIGH);
-  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Trigger: %s)\n", pumpFertActive ? "ON" : "OFF", reason);
+  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Trigger: %s%s)\n", 
+                pumpFertActive ? "ON" : "OFF", reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
 }
 
 void setPump(bool state, const char* reason = "Manual") {
@@ -434,12 +448,12 @@ void processScheduler() {
         if (curHour == schedules[i].hour && curMin == schedules[i].minute) {
           schedules[i].ranToday = true;
 
-          if (rainLocked) {
+          if (!safetyOverride && rainLocked) {
             Serial.printf("[TIMER SKIP] Schedule %d (%02d:%02d) skipped due to Rain Lockout.\n",
                           i + 1, schedules[i].hour, schedules[i].minute);
             continue;
           }
-          if (waterTankPercent < TANK_EMPTY_CUTOFF) {
+          if (!safetyOverride && waterTankPercent < TANK_EMPTY_CUTOFF) {
             Serial.printf("[TIMER SKIP] Schedule %d (%02d:%02d) skipped: reservoir empty!\n",
                           i + 1, schedules[i].hour, schedules[i].minute);
             continue;
@@ -494,7 +508,7 @@ void processScheduler() {
 
 // ==================== AUTOMATION ENGINE ====================
 void processAutomation() {
-  if (waterTankPercent < TANK_EMPTY_CUTOFF && (pumpWaterActive || pumpFertActive)) {
+  if (!safetyOverride && waterTankPercent < TANK_EMPTY_CUTOFF && (pumpWaterActive || pumpFertActive)) {
     Serial.println("[SAFETY CUTOFF] Tank < 15%! Emergency stopping both motors.");
     scheduleRunning = false;
     setWaterPump(false, "Emergency Cutoff");
@@ -502,7 +516,7 @@ void processAutomation() {
     return;
   }
 
-  if (rainLocked && (pumpWaterActive || pumpFertActive) && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
+  if (!safetyOverride && rainLocked && (pumpWaterActive || pumpFertActive) && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
     Serial.println("[SAFETY CUTOFF] Rain lockout active! Stopping both motors.");
     scheduleRunning = false;
     setWaterPump(false, "Rain Lockout");
@@ -511,7 +525,7 @@ void processAutomation() {
   }
 
   if (currentMode == MODE_AUTO_IRRIGATE && !scheduleRunning) {
-    if (soilPercent < SOIL_DRY_THRESHOLD && !pumpWaterActive && !rainLocked && waterTankPercent >= TANK_EMPTY_CUTOFF) {
+    if (soilPercent < SOIL_DRY_THRESHOLD && !pumpWaterActive && (safetyOverride || (!rainLocked && waterTankPercent >= TANK_EMPTY_CUTOFF))) {
       Serial.println("[AUTO TRIGGER] Soil moisture < 35%. Starting Motor 1 (Watering).");
       setWaterPump(true, "Soil Sensor Auto");
     } else if (soilPercent >= SOIL_WET_THRESHOLD && pumpWaterActive) {
@@ -523,7 +537,7 @@ void processAutomation() {
 
 // ==================== MQTT MESSAGING ====================
 void publishTelemetry() {
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<768> doc;
   doc["dev"]      = deviceId;
   doc["time"]     = currentTimeStr;
   doc["soil"]     = soilPercent;
@@ -548,6 +562,7 @@ void publishTelemetry() {
   doc["schedRun"] = scheduleRunning;
   doc["schedTgt"] = scheduleTarget;
   doc["nextRun"]  = nextRunString;
+  doc["safeBypass"] = safetyOverride; // Safety Bypass: true = force mode active, false = safeties enforced
 
   JsonArray arr = doc.createNestedArray("schedules");
   for (int i = 0; i < numSchedules; i++) {
@@ -560,13 +575,13 @@ void publishTelemetry() {
     s["tgt"] = schedules[i].target; // 0=Water, 1=Fert, 2=Both
   }
 
-  char buffer[512];
+  char buffer[768];
   size_t n = serializeJson(doc, buffer);
   mqttClient.publish(topicTelemetry, buffer, n);
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<768> doc;
   DeserializationError error = deserializeJson(doc, payload, length);
   if (error) {
     Serial.print("[MQTT] JSON parse error: ");
@@ -580,6 +595,23 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     Serial.printf("[SECURITY ALERT] Unauthorized command rejected! Provided auth '%s' does not match device PIN.\n", authPin);
     mqttClient.publish(topicStatus, "{\"security\":\"UNAUTHORIZED_COMMAND_REJECTED\"}");
     return;
+  }
+
+  // Handle Safety Mechanism Override Setting (Auth PIN already validated)
+  if (doc.containsKey("setSafetyBypass") || doc.containsKey("safetyBypass") || doc.containsKey("safetyOverride")) {
+    bool bypassVal = false;
+    if (doc.containsKey("setSafetyBypass")) bypassVal = doc["setSafetyBypass"];
+    else if (doc.containsKey("safetyBypass")) bypassVal = doc["safetyBypass"];
+    else if (doc.containsKey("safetyOverride")) bypassVal = doc["safetyOverride"];
+    saveSafetyOverride(bypassVal);
+    publishTelemetry();
+  }
+
+  if (doc.containsKey("force")) {
+    bool forceVal = doc["force"];
+    if (forceVal && !safetyOverride) {
+      saveSafetyOverride(true);
+    }
   }
 
   // Allow updating the PIN from the authenticated app
@@ -596,6 +628,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     const char* pCmd = doc["pump"];
     scheduleRunning = false;
     if (strcmp(pCmd, "on") == 0) {
+      currentMode = MODE_FULL_MANUAL;
       setWaterPump(true, "App Remote Command (Motor 1)");
     } else if (strcmp(pCmd, "off") == 0) {
       setWaterPump(false, "App Remote Command (Motor 1)");
@@ -606,6 +639,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     const char* fCmd = doc["fert"];
     scheduleRunning = false;
     if (strcmp(fCmd, "on") == 0) {
+      currentMode = MODE_FULL_MANUAL;
       setFertPump(true, "App Remote Command (Motor 2)");
     } else if (strcmp(fCmd, "off") == 0) {
       setFertPump(false, "App Remote Command (Motor 2)");
@@ -616,6 +650,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     const char* bCmd = doc["both"];
     scheduleRunning = false;
     if (strcmp(bCmd, "on") == 0) {
+      currentMode = MODE_FULL_MANUAL;
       setWaterPump(true, "App Remote Command (Both)");
       setFertPump(true, "App Remote Command (Both)");
     } else if (strcmp(bCmd, "off") == 0) {
