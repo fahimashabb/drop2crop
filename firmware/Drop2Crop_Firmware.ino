@@ -11,7 +11,7 @@
  *   - Capacitive Soil Moisture Sensor (GPIO 4)
  *   - Raindrop Sensor with 24-Hour Lockout Cycle (GPIO 5 DO, GPIO 6 AO)
  *   - HC-SR04 Ultrasonic Reservoir Level Monitor (GPIO 7 Trig, GPIO 8 Echo)
- *   - 5V Dual Relay Pump & Aux Valve Actuator (GPIO 9, GPIO 10 - Active LOW)
+ *   - 5V Dual Relay Pump & Aux Valve Actuator (GPIO 17, GPIO 18 - Active LOW)
  *   - Mosquitto MQTT Cloud Bridge (test.mosquitto.org)
  */
 
@@ -30,13 +30,9 @@
 #define PIN_TRIG             7   // HC-SR04 Trigger
 #define PIN_ECHO             8   // HC-SR04 Echo
 
-// Primary Relays (GPIO 17 & 18 - Clean, Non-conflicting Dedicated Outputs)
-#define PIN_RELAY_PUMP       17  // Primary Relay 1: Clean Water Pump (Active LOW)
-#define PIN_RELAY_VALVE      18  // Primary Relay 2: Aux/Fertigation (Active LOW)
-
-// Mirrored Relays (GPIO 9 & 10 - Driven in parallel so either wiring works seamlessly)
-#define PIN_RELAY_PUMP_ALT    9  // Alternate Relay 1: Clean Water Pump
-#define PIN_RELAY_VALVE_ALT  10  // Alternate Relay 2: Aux/Fertigation
+// Dedicated Relays (Clean GPIO 17 & 18 - Free from SPI flash/PSRAM bus)
+#define PIN_RELAY_PUMP       17  // Relay 1: Clean Water Pump (Active LOW)
+#define PIN_RELAY_VALVE      18  // Relay 2: Aux/Fertigation (Active LOW)
 
 #define PIN_BOOT_BUTTON      0   // Onboard BOOT Button for WiFi Reset
 
@@ -44,8 +40,11 @@
 const int SOIL_DRY_RAW   = 3150;
 const int SOIL_WET_RAW   = 1350;
 
+// Tank Level Calibration: 
+// 0.0 cm = Full tank (sensor at 0 distance / test obstacle)
+// 45.0 cm = Empty tank (sensor distance to bottom of empty reservoir)
 float reservoirMaxDepthCm = 45.0; // Distance when tank is EMPTY
-float reservoirMinDistCm  = 5.0;  // Distance when tank is FULL
+float reservoirMinDistCm  = 0.0;  // Calibrated zero-distance: 0 cm = 100% full
 
 const int SOIL_DRY_THRESHOLD   = 35; // Trigger irrigation < 35%
 const int SOIL_WET_THRESHOLD   = 70; // Target saturation 70%
@@ -120,8 +119,8 @@ unsigned long rainRemainingSec = 0;
 float waterDistCm = 0.0;
 int waterTankPercent = 0;
 
-bool pumpWaterActive = false; // Motor 1: Clean Water Irrigation Pump (Relay 1, GPIO 9)
-bool pumpFertActive  = false; // Motor 2: Fertigation Nutrient Pump (Relay 2, GPIO 10)
+bool pumpWaterActive = false; // Motor 1: Clean Water Irrigation Pump (Relay 1, GPIO 17)
+bool pumpFertActive  = false; // Motor 2: Fertigation Nutrient Pump (Relay 2, GPIO 18)
 bool safetyOverride  = false; // Safety Bypass: true = allow forcing motors ON/OFF regardless of water/rain
 bool relayActiveLow  = true;  // Relay Trigger: true = Active LOW (0V triggers), false = Active HIGH (3.3V triggers)
 
@@ -329,8 +328,25 @@ void startCaptivePortal() {
   Serial.println("==============================================\n");
 }
 
-// ==================== ACTUATOR CONTROL (DUAL MOTOR) ====================
+// ==================== ACTUATOR CONTROL (SINGLE CRISP CLICK - NO CHATTER) ====================
+unsigned long lastWaterPumpSwitch = 0;
+unsigned long lastFertPumpSwitch  = 0;
+const unsigned long RELAY_DEBOUNCE_COOLDOWN_MS = 1500; // Minimum 1.5s between mechanical state changes
+
 void setWaterPump(bool state, const char* reason = "Manual") {
+  // Guard 1: If motor is ALREADY in requested state, DO NOTHING! Prevents fluctuating signals.
+  if (pumpWaterActive == state) {
+    return;
+  }
+
+  // Guard 2: Enforce anti-chatter cooldown so relay clicks only ONCE
+  unsigned long now = millis();
+  if (now - lastWaterPumpSwitch < RELAY_DEBOUNCE_COOLDOWN_MS && lastWaterPumpSwitch > 0) {
+    Serial.printf("[DEBOUNCE] Water Pump transition to %s rejected: cooldown active (%lums remaining)\n",
+                  state ? "ON" : "OFF", RELAY_DEBOUNCE_COOLDOWN_MS - (now - lastWaterPumpSwitch));
+    return;
+  }
+
   int offLevel = relayActiveLow ? HIGH : LOW;
   int onLevel  = relayActiveLow ? LOW : HIGH;
 
@@ -338,7 +354,6 @@ void setWaterPump(bool state, const char* reason = "Manual") {
     Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: Tank < 15%% empty! (Safety Active)\n", reason);
     pumpWaterActive = false;
     digitalWrite(PIN_RELAY_PUMP, offLevel);
-    digitalWrite(PIN_RELAY_PUMP_ALT, offLevel);
     return;
   }
 
@@ -346,20 +361,32 @@ void setWaterPump(bool state, const char* reason = "Manual") {
     Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: 24h Rain Lockout! (Safety Active)\n", reason);
     pumpWaterActive = false;
     digitalWrite(PIN_RELAY_PUMP, offLevel);
-    digitalWrite(PIN_RELAY_PUMP_ALT, offLevel);
     return;
   }
 
   pumpWaterActive = state;
+  lastWaterPumpSwitch = now;
   int drivePinLevel = pumpWaterActive ? onLevel : offLevel;
   digitalWrite(PIN_RELAY_PUMP, drivePinLevel);
-  digitalWrite(PIN_RELAY_PUMP_ALT, drivePinLevel);
-  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pins %d & %d = %s, Trigger: %s%s)\n", 
-                pumpWaterActive ? "ON" : "OFF", PIN_RELAY_PUMP, PIN_RELAY_PUMP_ALT, drivePinLevel == LOW ? "LOW" : "HIGH",
+  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pin %d = %s, Trigger: %s%s)\n", 
+                pumpWaterActive ? "ON" : "OFF", PIN_RELAY_PUMP, drivePinLevel == LOW ? "LOW" : "HIGH",
                 reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
 }
 
 void setFertPump(bool state, const char* reason = "Manual") {
+  // Guard 1: If motor is ALREADY in requested state, DO NOTHING!
+  if (pumpFertActive == state) {
+    return;
+  }
+
+  // Guard 2: Enforce anti-chatter cooldown so relay clicks only ONCE
+  unsigned long now = millis();
+  if (now - lastFertPumpSwitch < RELAY_DEBOUNCE_COOLDOWN_MS && lastFertPumpSwitch > 0) {
+    Serial.printf("[DEBOUNCE] Fert Pump transition to %s rejected: cooldown active (%lums remaining)\n",
+                  state ? "ON" : "OFF", RELAY_DEBOUNCE_COOLDOWN_MS - (now - lastFertPumpSwitch));
+    return;
+  }
+
   int offLevel = relayActiveLow ? HIGH : LOW;
   int onLevel  = relayActiveLow ? LOW : HIGH;
 
@@ -367,7 +394,6 @@ void setFertPump(bool state, const char* reason = "Manual") {
     Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: Tank < 15%% empty! (Safety Active)\n", reason);
     pumpFertActive = false;
     digitalWrite(PIN_RELAY_VALVE, offLevel);
-    digitalWrite(PIN_RELAY_VALVE_ALT, offLevel);
     return;
   }
 
@@ -375,16 +401,15 @@ void setFertPump(bool state, const char* reason = "Manual") {
     Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: 24h Rain Lockout! (Safety Active)\n", reason);
     pumpFertActive = false;
     digitalWrite(PIN_RELAY_VALVE, offLevel);
-    digitalWrite(PIN_RELAY_VALVE_ALT, offLevel);
     return;
   }
 
   pumpFertActive = state;
+  lastFertPumpSwitch = now;
   int drivePinLevel = pumpFertActive ? onLevel : offLevel;
   digitalWrite(PIN_RELAY_VALVE, drivePinLevel);
-  digitalWrite(PIN_RELAY_VALVE_ALT, drivePinLevel);
-  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pins %d & %d = %s, Trigger: %s%s)\n", 
-                pumpFertActive ? "ON" : "OFF", PIN_RELAY_VALVE, PIN_RELAY_VALVE_ALT, drivePinLevel == LOW ? "LOW" : "HIGH",
+  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pin %d = %s, Trigger: %s%s)\n", 
+                pumpFertActive ? "ON" : "OFF", PIN_RELAY_VALVE, drivePinLevel == LOW ? "LOW" : "HIGH",
                 reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
 }
 
@@ -421,27 +446,72 @@ void readSensors() {
     rainRemainingSec = 0;
   }
 
-  // 3. HC-SR04 Ultrasonic Water Level
-  digitalWrite(PIN_TRIG, LOW);
-  delayMicroseconds(2);
-  digitalWrite(PIN_TRIG, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(PIN_TRIG, LOW);
+  // 3. HC-SR04 Ultrasonic Water Level (5-sample burst with median filter & zero-distance calibration)
+  float rawSamples[5];
+  int validCount = 0;
 
-  long duration = pulseIn(PIN_ECHO, HIGH, 30000);
-  if (duration == 0) {
-    waterDistCm = reservoirMaxDepthCm;
-  } else {
-    waterDistCm = (duration * 0.0343) / 2.0;
+  for (int i = 0; i < 5; i++) {
+    digitalWrite(PIN_TRIG, LOW);
+    delayMicroseconds(4);
+    digitalWrite(PIN_TRIG, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(PIN_TRIG, LOW);
+
+    long duration = pulseIn(PIN_ECHO, HIGH, 28000); // 28ms max (~4.8m)
+    if (duration > 0) {
+      float d = (duration * 0.0343f) / 2.0f;
+      if (d >= 0.0f && d <= 450.0f) {
+        rawSamples[validCount++] = d;
+      }
+    }
+    delay(10);
   }
 
-  float usableHeight = reservoirMaxDepthCm - reservoirMinDistCm;
-  if (usableHeight > 0) {
+  float measuredCm;
+  if (validCount > 0) {
+    // Sort samples to find median
+    for (int i = 0; i < validCount - 1; i++) {
+      for (int j = i + 1; j < validCount; j++) {
+        if (rawSamples[i] > rawSamples[j]) {
+          float tmp = rawSamples[i];
+          rawSamples[i] = rawSamples[j];
+          rawSamples[j] = tmp;
+        }
+      }
+    }
+    measuredCm = rawSamples[validCount / 2];
+
+    // Zero-Distance Calibration: When object is flush against transducer face (< 1.5 cm), clamp to 0.0 cm
+    if (measuredCm < 1.5f) {
+      measuredCm = 0.0f;
+    }
+  } else {
+    // If pulseIn returned 0 for all pulses:
+    // If previous reading was at zero distance (< 3.0cm), it's transducer blind-zone
+    if (waterDistCm <= 3.0f) {
+      measuredCm = 0.0f;
+    } else {
+      measuredCm = reservoirMaxDepthCm;
+    }
+  }
+
+  // Exponential Moving Average (EMA) to eliminate any jitter
+  static bool firstDistSample = true;
+  if (firstDistSample) {
+    waterDistCm = measuredCm;
+    firstDistSample = false;
+  } else {
+    waterDistCm = (0.35f * measuredCm) + (0.65f * waterDistCm);
+  }
+  if (waterDistCm < 0.2f) waterDistCm = 0.0f;
+
+  float usableHeight = reservoirMaxDepthCm - reservoirMinDistCm; // 45.0 cm - 0.0 cm = 45.0 cm
+  if (usableHeight > 0.0f) {
     float waterDepth = reservoirMaxDepthCm - waterDistCm;
-    waterTankPercent = (int)((waterDepth / usableHeight) * 100.0);
+    waterTankPercent = (int)round((waterDepth / usableHeight) * 100.0f);
     waterTankPercent = constrain(waterTankPercent, 0, 100);
   } else {
-    waterTankPercent = 50;
+    waterTankPercent = 100;
   }
 }
 
@@ -543,12 +613,19 @@ void processScheduler() {
 
 // ==================== AUTOMATION ENGINE ====================
 void processAutomation() {
+  // Safety Cutoff with verification counter to eliminate false cutoffs from water ripples
+  static int tankEmptyConfirm = 0;
   if (!safetyOverride && waterTankPercent < TANK_EMPTY_CUTOFF && (pumpWaterActive || pumpFertActive)) {
-    Serial.println("[SAFETY CUTOFF] Tank < 15%! Emergency stopping both motors.");
-    scheduleRunning = false;
-    setWaterPump(false, "Emergency Cutoff");
-    setFertPump(false, "Emergency Cutoff");
+    tankEmptyConfirm++;
+    if (tankEmptyConfirm >= 2) { // 2 consecutive checks (~3 seconds)
+      Serial.println("[SAFETY CUTOFF] Tank confirmed < 15%! Emergency stopping both motors.");
+      scheduleRunning = false;
+      setWaterPump(false, "Emergency Cutoff");
+      setFertPump(false, "Emergency Cutoff");
+    }
     return;
+  } else {
+    tankEmptyConfirm = 0;
   }
 
   if (!safetyOverride && rainLocked && (pumpWaterActive || pumpFertActive) && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
@@ -559,12 +636,13 @@ void processAutomation() {
     return;
   }
 
+  // Automatic Irrigation Logic (Strictly active ONLY in MODE_AUTO_IRRIGATE)
   if (currentMode == MODE_AUTO_IRRIGATE && !scheduleRunning) {
     if (soilPercent < SOIL_DRY_THRESHOLD && !pumpWaterActive && (safetyOverride || (!rainLocked && waterTankPercent >= TANK_EMPTY_CUTOFF))) {
       Serial.println("[AUTO TRIGGER] Soil moisture < 35%. Starting Motor 1 (Watering).");
       setWaterPump(true, "Soil Sensor Auto");
     } else if (soilPercent >= SOIL_WET_THRESHOLD && pumpWaterActive) {
-      Serial.println("[AUTO SHUTOFF] Optimal moisture reached. Stopping Motor 1 (Watering).");
+      Serial.println("[AUTO SHUTOFF] Optimal moisture reached (>= 70%). Stopping Motor 1 (Watering).");
       setWaterPump(false, "Soil Saturated");
     }
   }
@@ -666,21 +744,17 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   // Mechanical Click Diagnostic Test: Pulses Relay 1 & Relay 2 to test coils
   if (doc.containsKey("clickTest")) {
-    Serial.println("[TEST] Starting Relay Mechanical Click Diagnostic (Dual GPIO 17/9 & 18/10)...");
+    Serial.println("[TEST] Starting Relay Mechanical Click Diagnostic on GPIO 17 & 18...");
     for (int i = 0; i < 3; i++) {
       digitalWrite(PIN_RELAY_PUMP, relayActiveLow ? LOW : HIGH);
-      digitalWrite(PIN_RELAY_PUMP_ALT, relayActiveLow ? LOW : HIGH);
       delay(400);
       digitalWrite(PIN_RELAY_PUMP, relayActiveLow ? HIGH : LOW);
-      digitalWrite(PIN_RELAY_PUMP_ALT, relayActiveLow ? HIGH : LOW);
       delay(400);
     }
     for (int i = 0; i < 3; i++) {
       digitalWrite(PIN_RELAY_VALVE, relayActiveLow ? LOW : HIGH);
-      digitalWrite(PIN_RELAY_VALVE_ALT, relayActiveLow ? LOW : HIGH);
       delay(400);
       digitalWrite(PIN_RELAY_VALVE, relayActiveLow ? HIGH : LOW);
-      digitalWrite(PIN_RELAY_VALVE_ALT, relayActiveLow ? HIGH : LOW);
       delay(400);
     }
     setWaterPump(pumpWaterActive, "Test Completed");
@@ -865,8 +939,6 @@ void setup() {
 
   pinMode(PIN_RELAY_PUMP, OUTPUT);
   pinMode(PIN_RELAY_VALVE, OUTPUT);
-  pinMode(PIN_RELAY_PUMP_ALT, OUTPUT);
-  pinMode(PIN_RELAY_VALVE_ALT, OUTPUT);
 
   setWaterPump(false, "System Boot");
   setFertPump(false, "System Boot");
