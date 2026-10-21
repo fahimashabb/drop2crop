@@ -28,8 +28,10 @@
 #define PIN_SOIL_ANALOG      4   // Capacitive Soil Moisture (ADC1_CH3)
 #define PIN_RAIN_DIGITAL     5   // Rain Sensor Digital (DO)
 #define PIN_RAIN_ANALOG      6   // Rain Sensor Analog (AO)
-#define PIN_TRIG             7   // HC-SR04 Trigger
-#define PIN_ECHO             8   // HC-SR04 Echo
+
+// Ultrasonic Reservoir Level Monitor (GPIO 1 & 2 - Clean Dedicated Ports on J3 header)
+#define PIN_TRIG             1   // HC-SR04 Trigger (Pin 1 on bottom header)
+#define PIN_ECHO             2   // HC-SR04 Echo (Pin 2 on bottom header)
 
 // Primary Clean Relays (GPIO 13 & 14 - Pure GPIOs, Free from JTAG, SPI Flash, Boot Strapping, and USB)
 #define PIN_RELAY_PUMP       13  // Primary Relay 1: Clean Water Pump (Active LOW)
@@ -463,47 +465,23 @@ void readSensors() {
     rainRemainingSec = 0;
   }
 
-  // 3. HC-SR04 Ultrasonic Water Level (5-sample burst with median filter & zero-distance calibration)
-  float rawSamples[5];
-  int validCount = 0;
+  // 3. HC-SR04 Ultrasonic Water Level (Clean single ping on GPIO 1 & 2 with zero-distance calibration)
+  digitalWrite(PIN_TRIG, LOW);
+  delayMicroseconds(4);
+  digitalWrite(PIN_TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(PIN_TRIG, LOW);
 
-  for (int i = 0; i < 5; i++) {
-    digitalWrite(PIN_TRIG, LOW);
-    delayMicroseconds(4);
-    digitalWrite(PIN_TRIG, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(PIN_TRIG, LOW);
-
-    long duration = pulseIn(PIN_ECHO, HIGH, 28000); // 28ms max (~4.8m)
-    if (duration > 0) {
-      float d = (duration * 0.0343f) / 2.0f;
-      if (d >= 0.0f && d <= 450.0f) {
-        rawSamples[validCount++] = d;
-      }
-    }
-    delay(10);
-  }
-
+  long duration = pulseIn(PIN_ECHO, HIGH, 26000); // 26ms max (~4.5m)
   float measuredCm;
-  if (validCount > 0) {
-    // Sort samples to find median
-    for (int i = 0; i < validCount - 1; i++) {
-      for (int j = i + 1; j < validCount; j++) {
-        if (rawSamples[i] > rawSamples[j]) {
-          float tmp = rawSamples[i];
-          rawSamples[i] = rawSamples[j];
-          rawSamples[j] = tmp;
-        }
-      }
-    }
-    measuredCm = rawSamples[validCount / 2];
-
+  if (duration > 0) {
+    measuredCm = (duration * 0.0343f) / 2.0f;
     // Zero-Distance Calibration: When object is flush against transducer face (< 1.5 cm), clamp to 0.0 cm
     if (measuredCm < 1.5f) {
       measuredCm = 0.0f;
     }
   } else {
-    // If pulseIn returned 0 for all pulses:
+    // If pulseIn timed out:
     // If previous reading was at zero distance (< 3.0cm), it's transducer blind-zone
     if (waterDistCm <= 3.0f) {
       measuredCm = 0.0f;
@@ -958,7 +936,10 @@ void setup() {
   pinMode(PIN_SOIL_ANALOG, INPUT);
   pinMode(PIN_RAIN_DIGITAL, INPUT_PULLUP);
   pinMode(PIN_RAIN_ANALOG, INPUT);
+  gpio_reset_pin((gpio_num_t)PIN_TRIG);
+  gpio_reset_pin((gpio_num_t)PIN_ECHO);
   pinMode(PIN_TRIG, OUTPUT);
+  digitalWrite(PIN_TRIG, LOW);
   pinMode(PIN_ECHO, INPUT);
   pinMode(PIN_BOOT_BUTTON, INPUT_PULLUP); // Onboard BOOT button
 
