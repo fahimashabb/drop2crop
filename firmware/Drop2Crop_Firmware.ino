@@ -434,7 +434,8 @@ void readSensors() {
 
 // ==================== TIME & SCHEDULER ENGINE ====================
 void updateLocalTime() {
-  if (getLocalTime(&timeinfo)) {
+  // Use non-blocking 10ms timeout to prevent freezing the main loop / MQTT keepalive
+  if (getLocalTime(&timeinfo, 10)) {
     timeSynchronized = true;
     snprintf(currentTimeStr, sizeof(currentTimeStr), "%02d:%02d:%02d",
              timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
@@ -784,7 +785,7 @@ void connectMQTT() {
 
   // Connect with Last Will and Testament (LWT)
   // When ESP32 loses power or unplugs, broker automatically broadcasts {"online":false}
-  if (mqttClient.connect(deviceId, topicStatus, 0, true, "{\"online\":false}")) {
+  if (mqttClient.connect(deviceId, topicStatus, 0, false, "{\"online\":false}")) {
     Serial.println("[MQTT] Connected to Cloud Broker!");
     // Publish retained online status so web clients connecting later instantly see the online state
     mqttClient.publish(topicStatus, "{\"online\":true}", true);
@@ -801,7 +802,6 @@ void connectMQTT() {
 // ==================== SETUP & LOOP ====================
 void setup() {
   Serial.begin(115200);
-  Serial.setTxTimeoutMs(0); // Prevents blocking / watchdog resets if serial buffer is full
   delay(300);
   Serial.println("\n==============================================");
   Serial.println("  Drop2Crop - Cloud IoT & Precision Station");
@@ -857,6 +857,8 @@ void setup() {
     mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
     mqttClient.setCallback(mqttCallback);
     mqttClient.setBufferSize(512);
+    mqttClient.setKeepAlive(60);
+    mqttClient.setSocketTimeout(15);
 
     configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, "pool.ntp.org", "time.google.com");
   } else {

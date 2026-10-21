@@ -1278,9 +1278,13 @@
           if (topic === TOPIC_STATUS) {
             const st = JSON.parse(str);
             if (st.online === false) {
-              lastTelemetryTimestamp = 0;
-              updateDeviceOnlineState(false, 'Status topic reported offline');
-              logTerm('Alert: ESP32 reported OFFLINE (Turned off / Unplugged)');
+              if (Date.now() - lastTelemetryTimestamp > 8000) {
+                lastTelemetryTimestamp = 0;
+                updateDeviceOnlineState(false, 'Status topic reported offline');
+                logTerm('Alert: ESP32 reported OFFLINE (Turned off / Unplugged)');
+              } else {
+                logTerm('Ignored transient broker status (Live telemetry stream active)');
+              }
             } else if (st.online === true) {
               lastTelemetryTimestamp = Date.now();
               updateDeviceOnlineState(true);
