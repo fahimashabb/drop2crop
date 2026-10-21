@@ -706,6 +706,7 @@ void connectMQTT() {
 void startCaptivePortal() {
   inAPMode = true;
   WiFi.mode(WIFI_AP);
+  WiFi.setTxPower(WIFI_POWER_11dBm); // Prevent power brownout spikes during AP broadcast
   WiFi.softAP("Drop2Crop_WiFi_Setup");
   delay(100);
 
@@ -759,6 +760,7 @@ void setup() {
 
   // Initialize unique topics based on MAC address
   WiFi.mode(WIFI_STA);
+  WiFi.setTxPower(WIFI_POWER_11dBm); // Lowers peak Wi-Fi radio current spikes by ~40% to prevent brownout on jumper wires
   delay(100);
   uint8_t mac[6];
   WiFi.macAddress(mac);
