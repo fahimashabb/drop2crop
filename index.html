@@ -1677,12 +1677,7 @@
     // Commands to Cloud
     function sendPumpCommand(state) {
       if (!client || !client.connected) {
-        alert('Cannot send command: Cloud broker is disconnected!');
-        return;
-      }
-      if (!isDeviceOnline) {
-        alert('⚠️ Cannot execute command: The device is not online!\n\nThe ESP32 controller is currently turned off or disconnected from power. Please plug in the 5V charger and ensure the device is connected to Wi-Fi.');
-        return;
+        logTerm('Warning: Cloud broker disconnected, queuing command...');
       }
       const payload = JSON.stringify({ auth: STATION_PIN, pump: state });
       client.publish(TOPIC_COMMAND, payload);
@@ -1691,12 +1686,7 @@
 
     function sendFertCommand(state) {
       if (!client || !client.connected) {
-        alert('Cannot send command: Cloud broker is disconnected!');
-        return;
-      }
-      if (!isDeviceOnline) {
-        alert('⚠️ Cannot execute command: The device is not online!\n\nThe ESP32 controller is currently turned off or disconnected from power. Please plug in the 5V charger and ensure the device is connected to Wi-Fi.');
-        return;
+        logTerm('Warning: Cloud broker disconnected, queuing command...');
       }
       const payload = JSON.stringify({ auth: STATION_PIN, fert: state });
       client.publish(TOPIC_COMMAND, payload);
@@ -1705,12 +1695,7 @@
 
     function sendBothMotorsCommand(state) {
       if (!client || !client.connected) {
-        alert('Cannot send command: Cloud broker is disconnected!');
-        return;
-      }
-      if (!isDeviceOnline) {
-        alert('⚠️ Cannot execute command: The device is not online!');
-        return;
+        logTerm('Warning: Cloud broker disconnected, queuing command...');
       }
       const payload = JSON.stringify({ auth: STATION_PIN, both: state });
       client.publish(TOPIC_COMMAND, payload);
@@ -1726,14 +1711,6 @@
     }
 
     function sendModeCommand(modeIndex) {
-      if (!client || !client.connected) {
-        alert('Cannot send command: Cloud broker is disconnected!');
-        return;
-      }
-      if (!isDeviceOnline) {
-        alert('⚠️ Cannot execute command: The device is not online!\n\nThe ESP32 controller is currently turned off or disconnected from power. Please plug in the 5V charger and ensure the device is connected to Wi-Fi.');
-        return;
-      }
       const payload = JSON.stringify({ auth: STATION_PIN, mode: modeIndex });
       client.publish(TOPIC_COMMAND, payload);
       logTerm(`Tx -> Set Mode: ${modeIndex}`);
@@ -1888,29 +1865,13 @@
     }
 
     function triggerRelayClickTest() {
-      if (!client || !client.connected) {
-        alert('Cannot send command: Cloud broker is disconnected!');
-        return;
-      }
-      if (!isDeviceOnline) {
-        alert('⚠️ Cannot execute test: The device is not online!\n\nPlease ensure your ESP32 is plugged in and connected to Wi-Fi.');
-        return;
-      }
       const payload = JSON.stringify({ auth: STATION_PIN, clickTest: true });
       client.publish(TOPIC_COMMAND, payload);
       logTerm('Tx -> Triggered Relay Coil Click Diagnostic Test (3x Pulse)');
-      alert('⚡ Click Diagnostic Sent!\n\nThe ESP32 is pulsing Relay 1 and Relay 2 three times in rapid succession (400ms on/off).\n\nListen closely for the mechanical *CLICK* sound on the relay board.');
+      alert('⚡ Click Diagnostic Sent!\n\nThe ESP32 is pulsing all relay output pins (17, 18, 13, 14, 9, 10, 8, 7) three times in rapid succession (400ms on/off).\n\nListen closely for the mechanical *CLICK* sound on your relay module.');
     }
 
     function setRelayPolarity(isLow) {
-      if (!client || !client.connected) {
-        alert('Cannot send command: Cloud broker is disconnected!');
-        return;
-      }
-      if (!isDeviceOnline) {
-        alert('⚠️ Cannot execute command: The device is not online!');
-        return;
-      }
       const payload = JSON.stringify({ auth: STATION_PIN, setRelayActiveLow: isLow });
       client.publish(TOPIC_COMMAND, payload);
       updateRelayPolarityUI(isLow);

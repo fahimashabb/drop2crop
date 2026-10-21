@@ -130,6 +130,7 @@ bool pumpWaterActive = false; // Motor 1: Clean Water Irrigation Pump (Relay 1, 
 bool pumpFertActive  = false; // Motor 2: Fertigation Nutrient Pump (Relay 2, GPIO 18)
 bool safetyOverride  = false; // Safety Bypass: true = allow forcing motors ON/OFF regardless of water/rain
 bool relayActiveLow  = true;  // Relay Trigger: true = Active LOW (0V triggers), false = Active HIGH (3.3V triggers)
+bool ultrasonicEnabled = false; // Standalone Relay Mode: false = distance sensor detached, pins 8 & 7 driven as relays
 
 // NTP Time variables (UTC+6 Bangladesh Standard Time)
 const long  GMT_OFFSET_SEC = 21600;
@@ -147,6 +148,8 @@ const unsigned long CLOUD_REPORT_INTERVAL = 2000;
 unsigned long lastScheduleCheck = 0;
 unsigned long buttonPressStart = 0;
 
+void configurePins();
+
 // ==================== SCHEDULE & WIFI STORAGE (NVS FLASH) ====================
 void loadCredentials() {
   preferences.begin("d2c_cfg", false);
@@ -155,11 +158,13 @@ void loadCredentials() {
   devicePasscode = preferences.getString("pin", "2564");
   safetyOverride = preferences.getBool("safeBypass", false);
   relayActiveLow = preferences.getBool("relLow", true);
+  ultrasonicEnabled = preferences.getBool("ultraEn", false); // Default: Standalone Mode (No ultrasonic sensor required)
   preferences.end();
   Serial.printf("[NVS] Loaded WiFi Config: SSID='%s'\n", wifiSSID.c_str());
   Serial.printf("[NVS] Station Security PIN configured: '%s'\n", devicePasscode.c_str());
   Serial.printf("[NVS] Safety Mechanism: %s\n", safetyOverride ? "BYPASSED (Force Override Active)" : "ENFORCED (Safeties Active)");
   Serial.printf("[NVS] Relay Trigger Polarity: Active %s\n", relayActiveLow ? "LOW (0V = ON)" : "HIGH (3.3V = ON)");
+  Serial.printf("[NVS] Sensor Operation Mode: %s\n", ultrasonicEnabled ? "ULTRASONIC SENSOR ENABLED" : "STANDALONE RELAYS (No Ultrasonic Sensor)");
 
   preferences.begin("d2c_sched", false);
   numSchedules = preferences.getInt("count", 0);
@@ -222,6 +227,75 @@ void saveRelayTriggerMode(bool isLow) {
   preferences.putBool("relLow", relayActiveLow);
   preferences.end();
   Serial.printf("[RELAY] Trigger Polarity updated in Flash NVS: Active %s\n", relayActiveLow ? "LOW" : "HIGH");
+}
+
+void configurePins() {
+  int offLvl = relayActiveLow ? HIGH : LOW;
+
+  // Release all candidate pins from JTAG/peripheral matrices for pure, clean GPIO control
+  gpio_reset_pin((gpio_num_t)PIN_RELAY_PUMP);
+  gpio_reset_pin((gpio_num_t)PIN_RELAY_VALVE);
+  gpio_reset_pin((gpio_num_t)PIN_RELAY_PUMP_ALT);
+  gpio_reset_pin((gpio_num_t)PIN_RELAY_VALVE_ALT);
+  gpio_reset_pin((gpio_num_t)17);
+  gpio_reset_pin((gpio_num_t)18);
+  gpio_reset_pin((gpio_num_t)9);
+  gpio_reset_pin((gpio_num_t)10);
+  gpio_reset_pin((gpio_num_t)PIN_TRIG); // GPIO 7
+  gpio_reset_pin((gpio_num_t)PIN_ECHO); // GPIO 8
+
+  // Set maximum drive capability on all relay lines
+  gpio_set_drive_capability((gpio_num_t)PIN_RELAY_PUMP, GPIO_DRIVE_CAP_3);
+  gpio_set_drive_capability((gpio_num_t)PIN_RELAY_VALVE, GPIO_DRIVE_CAP_3);
+  gpio_set_drive_capability((gpio_num_t)PIN_RELAY_PUMP_ALT, GPIO_DRIVE_CAP_3);
+  gpio_set_drive_capability((gpio_num_t)PIN_RELAY_VALVE_ALT, GPIO_DRIVE_CAP_3);
+  gpio_set_drive_capability((gpio_num_t)17, GPIO_DRIVE_CAP_3);
+  gpio_set_drive_capability((gpio_num_t)18, GPIO_DRIVE_CAP_3);
+  gpio_set_drive_capability((gpio_num_t)9, GPIO_DRIVE_CAP_3);
+  gpio_set_drive_capability((gpio_num_t)10, GPIO_DRIVE_CAP_3);
+
+  digitalWrite(PIN_RELAY_PUMP, offLvl);
+  digitalWrite(PIN_RELAY_VALVE, offLvl);
+  digitalWrite(PIN_RELAY_PUMP_ALT, offLvl);
+  digitalWrite(PIN_RELAY_VALVE_ALT, offLvl);
+  digitalWrite(17, offLvl);
+  digitalWrite(18, offLvl);
+  digitalWrite(9, offLvl);
+  digitalWrite(10, offLvl);
+
+  pinMode(PIN_RELAY_PUMP, OUTPUT);
+  pinMode(PIN_RELAY_VALVE, OUTPUT);
+  pinMode(PIN_RELAY_PUMP_ALT, OUTPUT);
+  pinMode(PIN_RELAY_VALVE_ALT, OUTPUT);
+  pinMode(17, OUTPUT);
+  pinMode(18, OUTPUT);
+  pinMode(9, OUTPUT);
+  pinMode(10, OUTPUT);
+
+  if (ultrasonicEnabled) {
+    pinMode(PIN_TRIG, OUTPUT);
+    digitalWrite(PIN_TRIG, LOW);
+    pinMode(PIN_ECHO, INPUT_PULLDOWN);
+    Serial.println("[PINS] Ultrasonic Mode: GPIO 7 = Trig, GPIO 8 = Echo");
+  } else {
+    // Standalone Relay Mode: Pins 7 & 8 are safe OUTPUTS driven in parallel with relays!
+    gpio_set_drive_capability((gpio_num_t)7, GPIO_DRIVE_CAP_3);
+    gpio_set_drive_capability((gpio_num_t)8, GPIO_DRIVE_CAP_3);
+    digitalWrite(7, offLvl);
+    digitalWrite(8, offLvl);
+    pinMode(7, OUTPUT);
+    pinMode(8, OUTPUT);
+    Serial.println("[PINS] Standalone Relay Mode: GPIO 8 = Relay 1 (Water), GPIO 7 = Relay 2 (Fert)");
+  }
+}
+
+void saveUltrasonicMode(bool en) {
+  ultrasonicEnabled = en;
+  preferences.begin("d2c_cfg", false);
+  preferences.putBool("ultraEn", en);
+  preferences.end();
+  Serial.printf("[NVS] Ultrasonic Sensor Mode updated to: %s\n", en ? "ENABLED" : "DISABLED (Standalone Relays)");
+  configurePins();
 }
 
 void saveSchedulesToNVS() {
@@ -365,6 +439,7 @@ void setWaterPump(bool state, const char* reason = "Manual") {
     digitalWrite(PIN_RELAY_PUMP_ALT, offLevel);
     digitalWrite(17, offLevel);
     digitalWrite(9, offLevel);
+    if (!ultrasonicEnabled) digitalWrite(8, offLevel);
     return;
   }
 
@@ -375,8 +450,13 @@ void setWaterPump(bool state, const char* reason = "Manual") {
   digitalWrite(PIN_RELAY_PUMP_ALT, drivePinLevel);  // GPIO 21
   digitalWrite(17, drivePinLevel);                  // GPIO 17
   digitalWrite(9, drivePinLevel);                   // GPIO 9
-  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pins 13, 17, 9 & 21 = %s, Trigger: %s%s)\n", 
-                pumpWaterActive ? "ON" : "OFF", drivePinLevel == LOW ? "LOW" : "HIGH",
+  if (!ultrasonicEnabled) {
+    digitalWrite(8, drivePinLevel);                 // GPIO 8 (Mirrored Relay 1 in Standalone Mode)
+  }
+  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pins 13, 17, 9, 21%s = %s, Trigger: %s%s)\n", 
+                pumpWaterActive ? "ON" : "OFF", 
+                !ultrasonicEnabled ? " & 8" : "",
+                drivePinLevel == LOW ? "LOW" : "HIGH",
                 reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
 }
 
@@ -404,6 +484,7 @@ void setFertPump(bool state, const char* reason = "Manual") {
     digitalWrite(PIN_RELAY_VALVE_ALT, offLevel);
     digitalWrite(18, offLevel);
     digitalWrite(10, offLevel);
+    if (!ultrasonicEnabled) digitalWrite(7, offLevel);
     return;
   }
 
@@ -414,8 +495,13 @@ void setFertPump(bool state, const char* reason = "Manual") {
   digitalWrite(PIN_RELAY_VALVE_ALT, drivePinLevel); // GPIO 47
   digitalWrite(18, drivePinLevel);                  // GPIO 18
   digitalWrite(10, drivePinLevel);                  // GPIO 10
-  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pins 14, 18, 10 & 47 = %s, Trigger: %s%s)\n", 
-                pumpFertActive ? "ON" : "OFF", drivePinLevel == LOW ? "LOW" : "HIGH",
+  if (!ultrasonicEnabled) {
+    digitalWrite(7, drivePinLevel);                 // GPIO 7 (Mirrored Relay 2 in Standalone Mode)
+  }
+  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pins 14, 18, 10, 47%s = %s, Trigger: %s%s)\n", 
+                pumpFertActive ? "ON" : "OFF", 
+                !ultrasonicEnabled ? " & 7" : "",
+                drivePinLevel == LOW ? "LOW" : "HIGH",
                 reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
 }
 
@@ -452,46 +538,52 @@ void readSensors() {
     rainRemainingSec = 0;
   }
 
-  // 3. HC-SR04 Ultrasonic Water Level (Pins: GPIO 7 Trig, GPIO 8 Echo - Isolated Telemetry)
-  digitalWrite(PIN_TRIG, LOW);
-  delayMicroseconds(4);
-  digitalWrite(PIN_TRIG, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(PIN_TRIG, LOW);
+  // 3. HC-SR04 Ultrasonic Water Level (Only active when ultrasonicEnabled == true)
+  if (ultrasonicEnabled) {
+    digitalWrite(PIN_TRIG, LOW);
+    delayMicroseconds(4);
+    digitalWrite(PIN_TRIG, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(PIN_TRIG, LOW);
 
-  long duration = pulseIn(PIN_ECHO, HIGH, 26000); // 26ms max (~4.5m)
-  static bool firstDistSample = true;
-  if (duration > 0) {
-    float measuredCm = (duration * 0.0343f) / 2.0f;
-    // Zero-Distance Calibration: When object is flush against transducer face (< 1.5 cm), clamp to 0.0 cm
-    if (measuredCm < 1.5f) {
-      measuredCm = 0.0f;
-    }
-    if (measuredCm > reservoirMaxDepthCm) {
-      measuredCm = reservoirMaxDepthCm;
-    }
+    long duration = pulseIn(PIN_ECHO, HIGH, 26000); // 26ms max (~4.5m)
+    static bool firstDistSample = true;
+    if (duration > 0) {
+      float measuredCm = (duration * 0.0343f) / 2.0f;
+      // Zero-Distance Calibration: When object is flush against transducer face (< 1.5 cm), clamp to 0.0 cm
+      if (measuredCm < 1.5f) {
+        measuredCm = 0.0f;
+      }
+      if (measuredCm > reservoirMaxDepthCm) {
+        measuredCm = reservoirMaxDepthCm;
+      }
 
-    // Exponential Moving Average (EMA) to eliminate any jitter
-    if (firstDistSample) {
-      waterDistCm = measuredCm;
-      firstDistSample = false;
+      // Exponential Moving Average (EMA) to eliminate any jitter
+      if (firstDistSample) {
+        waterDistCm = measuredCm;
+        firstDistSample = false;
+      } else {
+        waterDistCm = (0.35f * measuredCm) + (0.65f * waterDistCm);
+      }
+      if (waterDistCm < 0.2f) waterDistCm = 0.0f;
+
+      float usableHeight = reservoirMaxDepthCm - reservoirMinDistCm; // 45.0 cm - 0.0 cm = 45.0 cm
+      if (usableHeight > 0.0f) {
+        float waterDepth = reservoirMaxDepthCm - waterDistCm;
+        waterTankPercent = (int)round((waterDepth / usableHeight) * 100.0f);
+        waterTankPercent = constrain(waterTankPercent, 0, 100);
+      } else {
+        waterTankPercent = 100;
+      }
     } else {
-      waterDistCm = (0.35f * measuredCm) + (0.65f * waterDistCm);
-    }
-    if (waterDistCm < 0.2f) waterDistCm = 0.0f;
-
-    float usableHeight = reservoirMaxDepthCm - reservoirMinDistCm; // 45.0 cm - 0.0 cm = 45.0 cm
-    if (usableHeight > 0.0f) {
-      float waterDepth = reservoirMaxDepthCm - waterDistCm;
-      waterTankPercent = (int)round((waterDepth / usableHeight) * 100.0f);
-      waterTankPercent = constrain(waterTankPercent, 0, 100);
-    } else {
+      // Sensor disconnected / unplugged / timed out:
+      firstDistSample = true;
+      waterDistCm = 0.0f;
       waterTankPercent = 100;
     }
   } else {
-    // Sensor disconnected / unplugged / timed out:
-    // Safe telemetry default: 100% full, 0.0cm so it NEVER blocks motors or triggers empty alarms
-    firstDistSample = true;
+    // Standalone Relay Mode: Distance sensor completely disabled
+    // Zero pulsing, zero pulseIn, zero pin blocking, zero false triggers!
     waterDistCm = 0.0f;
     waterTankPercent = 100;
   }
@@ -641,6 +733,7 @@ void publishTelemetry() {
   doc["nextRun"]  = nextRunString;
   doc["safeBypass"] = safetyOverride; // Safety Bypass: true = force mode active, false = safeties enforced
   doc["relLow"]     = relayActiveLow;  // Relay Trigger: true = Active LOW, false = Active HIGH
+  doc["ultraEn"]    = ultrasonicEnabled; // Sensor Mode: true = Ultrasonic Active, false = Standalone Relays
 
   JsonArray arr = doc.createNestedArray("schedules");
   for (int i = 0; i < numSchedules; i++) {
@@ -706,19 +799,30 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     publishTelemetry();
   }
 
+  // Handle Ultrasonic Sensor Mode Setting (Standalone Relays vs Ultrasonic Sensor)
+  if (doc.containsKey("setUltra") || doc.containsKey("ultraEn")) {
+    bool uVal = false;
+    if (doc.containsKey("setUltra")) uVal = doc["setUltra"];
+    else if (doc.containsKey("ultraEn")) uVal = doc["ultraEn"];
+    saveUltrasonicMode(uVal);
+    publishTelemetry();
+  }
+
   // Mechanical Click Diagnostic Test: Pulses Relay 1 & Relay 2 to test coils
   if (doc.containsKey("clickTest")) {
-    Serial.println("[TEST] Starting Relay Mechanical Click Diagnostic on GPIO 13/21/17/9 & 14/47/18/10...");
+    Serial.println("[TEST] Starting Relay Mechanical Click Diagnostic across all candidate pins...");
     for (int i = 0; i < 3; i++) {
       digitalWrite(PIN_RELAY_PUMP, relayActiveLow ? LOW : HIGH);
       digitalWrite(PIN_RELAY_PUMP_ALT, relayActiveLow ? LOW : HIGH);
       digitalWrite(17, relayActiveLow ? LOW : HIGH);
       digitalWrite(9, relayActiveLow ? LOW : HIGH);
+      if (!ultrasonicEnabled) digitalWrite(8, relayActiveLow ? LOW : HIGH);
       delay(400);
       digitalWrite(PIN_RELAY_PUMP, relayActiveLow ? HIGH : LOW);
       digitalWrite(PIN_RELAY_PUMP_ALT, relayActiveLow ? HIGH : LOW);
       digitalWrite(17, relayActiveLow ? HIGH : LOW);
       digitalWrite(9, relayActiveLow ? HIGH : LOW);
+      if (!ultrasonicEnabled) digitalWrite(8, relayActiveLow ? HIGH : LOW);
       delay(400);
     }
     for (int i = 0; i < 3; i++) {
@@ -726,11 +830,13 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       digitalWrite(PIN_RELAY_VALVE_ALT, relayActiveLow ? LOW : HIGH);
       digitalWrite(18, relayActiveLow ? LOW : HIGH);
       digitalWrite(10, relayActiveLow ? LOW : HIGH);
+      if (!ultrasonicEnabled) digitalWrite(7, relayActiveLow ? LOW : HIGH);
       delay(400);
       digitalWrite(PIN_RELAY_VALVE, relayActiveLow ? HIGH : LOW);
       digitalWrite(PIN_RELAY_VALVE_ALT, relayActiveLow ? HIGH : LOW);
       digitalWrite(18, relayActiveLow ? HIGH : LOW);
       digitalWrite(10, relayActiveLow ? HIGH : LOW);
+      if (!ultrasonicEnabled) digitalWrite(7, relayActiveLow ? HIGH : LOW);
       delay(400);
     }
     setWaterPump(pumpWaterActive, "Test Completed");
@@ -909,52 +1015,10 @@ void setup() {
   pinMode(PIN_SOIL_ANALOG, INPUT);
   pinMode(PIN_RAIN_DIGITAL, INPUT_PULLUP);
   pinMode(PIN_RAIN_ANALOG, INPUT);
-  gpio_reset_pin((gpio_num_t)PIN_TRIG);
-  gpio_reset_pin((gpio_num_t)PIN_ECHO);
-  pinMode(PIN_TRIG, OUTPUT);
-  digitalWrite(PIN_TRIG, LOW);
-  pinMode(PIN_ECHO, INPUT_PULLDOWN); // Strong internal pulldown prevents floating noise if disconnected or touched
   pinMode(PIN_BOOT_BUTTON, INPUT_PULLUP); // Onboard BOOT button
 
-  // Release any peripheral/JTAG matrix from pins to guarantee 100% pure, stable GPIO operation
-  gpio_reset_pin((gpio_num_t)PIN_RELAY_PUMP);
-  gpio_reset_pin((gpio_num_t)PIN_RELAY_VALVE);
-  gpio_reset_pin((gpio_num_t)PIN_RELAY_PUMP_ALT);
-  gpio_reset_pin((gpio_num_t)PIN_RELAY_VALVE_ALT);
-  gpio_reset_pin((gpio_num_t)17);
-  gpio_reset_pin((gpio_num_t)18);
-  gpio_reset_pin((gpio_num_t)9);
-  gpio_reset_pin((gpio_num_t)10);
-
-  // Set maximum current drive strength to eliminate any voltage sag or floating jitter
-  gpio_set_drive_capability((gpio_num_t)PIN_RELAY_PUMP, GPIO_DRIVE_CAP_3);
-  gpio_set_drive_capability((gpio_num_t)PIN_RELAY_VALVE, GPIO_DRIVE_CAP_3);
-  gpio_set_drive_capability((gpio_num_t)PIN_RELAY_PUMP_ALT, GPIO_DRIVE_CAP_3);
-  gpio_set_drive_capability((gpio_num_t)PIN_RELAY_VALVE_ALT, GPIO_DRIVE_CAP_3);
-  gpio_set_drive_capability((gpio_num_t)17, GPIO_DRIVE_CAP_3);
-  gpio_set_drive_capability((gpio_num_t)18, GPIO_DRIVE_CAP_3);
-  gpio_set_drive_capability((gpio_num_t)9, GPIO_DRIVE_CAP_3);
-  gpio_set_drive_capability((gpio_num_t)10, GPIO_DRIVE_CAP_3);
-
-  // Set initial state OFF before enabling output mode to prevent boot twitch
-  int offLvl = relayActiveLow ? HIGH : LOW;
-  digitalWrite(PIN_RELAY_PUMP, offLvl);
-  digitalWrite(PIN_RELAY_VALVE, offLvl);
-  digitalWrite(PIN_RELAY_PUMP_ALT, offLvl);
-  digitalWrite(PIN_RELAY_VALVE_ALT, offLvl);
-  digitalWrite(17, offLvl);
-  digitalWrite(18, offLvl);
-  digitalWrite(9, offLvl);
-  digitalWrite(10, offLvl);
-
-  pinMode(PIN_RELAY_PUMP, OUTPUT);
-  pinMode(PIN_RELAY_VALVE, OUTPUT);
-  pinMode(PIN_RELAY_PUMP_ALT, OUTPUT);
-  pinMode(PIN_RELAY_VALVE_ALT, OUTPUT);
-  pinMode(17, OUTPUT);
-  pinMode(18, OUTPUT);
-  pinMode(9, OUTPUT);
-  pinMode(10, OUTPUT);
+  // Configure Relays & Sensor Pins according to active mode
+  configurePins();
 
   setWaterPump(false, "System Boot");
   setFertPump(false, "System Boot");
