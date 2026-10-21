@@ -477,7 +477,7 @@
                   <div class="text-base font-bold font-display text-white">Motor 1: Clean Water</div>
                 </div>
                 <p class="text-xs text-slate-400 mt-1">
-                  Relay 1 (GPIO 17) · Feeds fresh reservoir water
+                  Relay 1 (GPIO 13) · Feeds fresh reservoir water
                 </p>
               </div>
               <span id="pumpStatusPill" class="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 font-sans font-medium">STOPPED</span>
@@ -498,7 +498,7 @@
                   <div class="text-base font-bold font-display text-white">Motor 2: Fertigation</div>
                 </div>
                 <p class="text-xs text-slate-400 mt-1">
-                  Relay 2 (GPIO 18) · Feeds fertilizer-mixed solution
+                  Relay 2 (GPIO 14) · Feeds fertilizer-mixed solution
                 </p>
               </div>
               <span id="fertStatusPill" class="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 font-sans font-medium">STOPPED</span>
@@ -843,13 +843,14 @@
             <span>🔌 5. Recommended GPIO Ports & Relay Wiring</span>
           </div>
           <p class="text-slate-300 leading-relaxed">
-            Connect your relay signal wires to the dedicated, clean GPIO pins:
+            Connect your relay signal wires to the dedicated, clean GPIO pins (free from JTAG & Flash):
           </p>
           <ul class="text-slate-300 space-y-1 list-disc list-inside font-mono text-[11px] bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
-            <li><span class="text-emerald-400 font-bold">Relay IN1 (Clean Water Pump):</span> Connect to <b>GPIO 17</b></li>
-            <li><span class="text-emerald-400 font-bold">Relay IN2 (Fertigation Pump):</span> Connect to <b>GPIO 18</b></li>
+            <li><span class="text-emerald-400 font-bold">Relay IN1 (Clean Water Pump):</span> Connect to <b>GPIO 13</b> (or GPIO 21)</li>
+            <li><span class="text-emerald-400 font-bold">Relay IN2 (Fertigation Pump):</span> Connect to <b>GPIO 14</b> (or GPIO 47)</li>
             <li><span class="text-amber-400 font-bold">Relay VCC:</span> Connect to <b>5Vin</b> (5V rail) — NOT 3.3V!</li>
-            <li><span class="text-sky-400 font-bold">Relay Blue Jumper:</span> Keep attached across <b>JD-VCC & VCC</b></li>
+            <li><span class="text-sky-400 font-bold">Relay GND:</span> Connect to ESP32 <b>GND</b></li>
+            <li><span class="text-indigo-400 font-bold">Relay Blue Jumper:</span> Keep attached across <b>JD-VCC & VCC</b> (or separate JD-VCC to 5V)</li>
           </ul>
         </div>
       </div>

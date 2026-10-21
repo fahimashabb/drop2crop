@@ -22,6 +22,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <time.h>
+#include "driver/gpio.h"
 
 // ==================== PIN DEFINITIONS ====================
 #define PIN_SOIL_ANALOG      4   // Capacitive Soil Moisture (ADC1_CH3)
@@ -30,9 +31,13 @@
 #define PIN_TRIG             7   // HC-SR04 Trigger
 #define PIN_ECHO             8   // HC-SR04 Echo
 
-// Dedicated Relays (Clean GPIO 17 & 18 - Free from SPI flash/PSRAM bus)
-#define PIN_RELAY_PUMP       17  // Relay 1: Clean Water Pump (Active LOW)
-#define PIN_RELAY_VALVE      18  // Relay 2: Aux/Fertigation (Active LOW)
+// Primary Clean Relays (GPIO 13 & 14 - Pure GPIOs, Free from JTAG, SPI Flash, Boot Strapping, and USB)
+#define PIN_RELAY_PUMP       13  // Primary Relay 1: Clean Water Pump (Active LOW)
+#define PIN_RELAY_VALVE      14  // Primary Relay 2: Aux/Fertigation (Active LOW)
+
+// Mirrored Safe Relays (GPIO 21 & 47 - Driven in parallel for maximum hardware flexibility)
+#define PIN_RELAY_PUMP_ALT   21  // Alternate Relay 1: Clean Water Pump
+#define PIN_RELAY_VALVE_ALT  47  // Alternate Relay 2: Aux/Fertigation
 
 #define PIN_BOOT_BUTTON      0   // Onboard BOOT Button for WiFi Reset
 
@@ -354,6 +359,8 @@ void setWaterPump(bool state, const char* reason = "Manual") {
     Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: Tank < 15%% empty! (Safety Active)\n", reason);
     pumpWaterActive = false;
     digitalWrite(PIN_RELAY_PUMP, offLevel);
+    digitalWrite(PIN_RELAY_PUMP_ALT, offLevel);
+    digitalWrite(17, offLevel);
     return;
   }
 
@@ -361,6 +368,8 @@ void setWaterPump(bool state, const char* reason = "Manual") {
     Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: 24h Rain Lockout! (Safety Active)\n", reason);
     pumpWaterActive = false;
     digitalWrite(PIN_RELAY_PUMP, offLevel);
+    digitalWrite(PIN_RELAY_PUMP_ALT, offLevel);
+    digitalWrite(17, offLevel);
     return;
   }
 
@@ -368,8 +377,10 @@ void setWaterPump(bool state, const char* reason = "Manual") {
   lastWaterPumpSwitch = now;
   int drivePinLevel = pumpWaterActive ? onLevel : offLevel;
   digitalWrite(PIN_RELAY_PUMP, drivePinLevel);
-  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pin %d = %s, Trigger: %s%s)\n", 
-                pumpWaterActive ? "ON" : "OFF", PIN_RELAY_PUMP, drivePinLevel == LOW ? "LOW" : "HIGH",
+  digitalWrite(PIN_RELAY_PUMP_ALT, drivePinLevel);
+  digitalWrite(17, drivePinLevel);
+  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pins %d, %d & 17 = %s, Trigger: %s%s)\n", 
+                pumpWaterActive ? "ON" : "OFF", PIN_RELAY_PUMP, PIN_RELAY_PUMP_ALT, drivePinLevel == LOW ? "LOW" : "HIGH",
                 reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
 }
 
@@ -394,6 +405,8 @@ void setFertPump(bool state, const char* reason = "Manual") {
     Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: Tank < 15%% empty! (Safety Active)\n", reason);
     pumpFertActive = false;
     digitalWrite(PIN_RELAY_VALVE, offLevel);
+    digitalWrite(PIN_RELAY_VALVE_ALT, offLevel);
+    digitalWrite(18, offLevel);
     return;
   }
 
@@ -401,6 +414,8 @@ void setFertPump(bool state, const char* reason = "Manual") {
     Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: 24h Rain Lockout! (Safety Active)\n", reason);
     pumpFertActive = false;
     digitalWrite(PIN_RELAY_VALVE, offLevel);
+    digitalWrite(PIN_RELAY_VALVE_ALT, offLevel);
+    digitalWrite(18, offLevel);
     return;
   }
 
@@ -408,8 +423,10 @@ void setFertPump(bool state, const char* reason = "Manual") {
   lastFertPumpSwitch = now;
   int drivePinLevel = pumpFertActive ? onLevel : offLevel;
   digitalWrite(PIN_RELAY_VALVE, drivePinLevel);
-  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pin %d = %s, Trigger: %s%s)\n", 
-                pumpFertActive ? "ON" : "OFF", PIN_RELAY_VALVE, drivePinLevel == LOW ? "LOW" : "HIGH",
+  digitalWrite(PIN_RELAY_VALVE_ALT, drivePinLevel);
+  digitalWrite(18, drivePinLevel);
+  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pins %d, %d & 18 = %s, Trigger: %s%s)\n", 
+                pumpFertActive ? "ON" : "OFF", PIN_RELAY_VALVE, PIN_RELAY_VALVE_ALT, drivePinLevel == LOW ? "LOW" : "HIGH",
                 reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
 }
 
@@ -744,17 +761,25 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   // Mechanical Click Diagnostic Test: Pulses Relay 1 & Relay 2 to test coils
   if (doc.containsKey("clickTest")) {
-    Serial.println("[TEST] Starting Relay Mechanical Click Diagnostic on GPIO 17 & 18...");
+    Serial.println("[TEST] Starting Relay Mechanical Click Diagnostic on GPIO 13/21/17 & 14/47/18...");
     for (int i = 0; i < 3; i++) {
       digitalWrite(PIN_RELAY_PUMP, relayActiveLow ? LOW : HIGH);
+      digitalWrite(PIN_RELAY_PUMP_ALT, relayActiveLow ? LOW : HIGH);
+      digitalWrite(17, relayActiveLow ? LOW : HIGH);
       delay(400);
       digitalWrite(PIN_RELAY_PUMP, relayActiveLow ? HIGH : LOW);
+      digitalWrite(PIN_RELAY_PUMP_ALT, relayActiveLow ? HIGH : LOW);
+      digitalWrite(17, relayActiveLow ? HIGH : LOW);
       delay(400);
     }
     for (int i = 0; i < 3; i++) {
       digitalWrite(PIN_RELAY_VALVE, relayActiveLow ? LOW : HIGH);
+      digitalWrite(PIN_RELAY_VALVE_ALT, relayActiveLow ? LOW : HIGH);
+      digitalWrite(18, relayActiveLow ? LOW : HIGH);
       delay(400);
       digitalWrite(PIN_RELAY_VALVE, relayActiveLow ? HIGH : LOW);
+      digitalWrite(PIN_RELAY_VALVE_ALT, relayActiveLow ? HIGH : LOW);
+      digitalWrite(18, relayActiveLow ? HIGH : LOW);
       delay(400);
     }
     setWaterPump(pumpWaterActive, "Test Completed");
@@ -937,8 +962,37 @@ void setup() {
   pinMode(PIN_ECHO, INPUT);
   pinMode(PIN_BOOT_BUTTON, INPUT_PULLUP); // Onboard BOOT button
 
+  // Release any peripheral/JTAG matrix from pins to guarantee 100% pure, stable GPIO operation
+  gpio_reset_pin((gpio_num_t)PIN_RELAY_PUMP);
+  gpio_reset_pin((gpio_num_t)PIN_RELAY_VALVE);
+  gpio_reset_pin((gpio_num_t)PIN_RELAY_PUMP_ALT);
+  gpio_reset_pin((gpio_num_t)PIN_RELAY_VALVE_ALT);
+  gpio_reset_pin((gpio_num_t)17);
+  gpio_reset_pin((gpio_num_t)18);
+
+  // Set maximum current drive strength to eliminate any voltage sag or floating jitter
+  gpio_set_drive_capability((gpio_num_t)PIN_RELAY_PUMP, GPIO_DRIVE_CAP_3);
+  gpio_set_drive_capability((gpio_num_t)PIN_RELAY_VALVE, GPIO_DRIVE_CAP_3);
+  gpio_set_drive_capability((gpio_num_t)PIN_RELAY_PUMP_ALT, GPIO_DRIVE_CAP_3);
+  gpio_set_drive_capability((gpio_num_t)PIN_RELAY_VALVE_ALT, GPIO_DRIVE_CAP_3);
+  gpio_set_drive_capability((gpio_num_t)17, GPIO_DRIVE_CAP_3);
+  gpio_set_drive_capability((gpio_num_t)18, GPIO_DRIVE_CAP_3);
+
+  // Set initial state OFF before enabling output mode to prevent boot twitch
+  int offLvl = relayActiveLow ? HIGH : LOW;
+  digitalWrite(PIN_RELAY_PUMP, offLvl);
+  digitalWrite(PIN_RELAY_VALVE, offLvl);
+  digitalWrite(PIN_RELAY_PUMP_ALT, offLvl);
+  digitalWrite(PIN_RELAY_VALVE_ALT, offLvl);
+  digitalWrite(17, offLvl);
+  digitalWrite(18, offLvl);
+
   pinMode(PIN_RELAY_PUMP, OUTPUT);
   pinMode(PIN_RELAY_VALVE, OUTPUT);
+  pinMode(PIN_RELAY_PUMP_ALT, OUTPUT);
+  pinMode(PIN_RELAY_VALVE_ALT, OUTPUT);
+  pinMode(17, OUTPUT);
+  pinMode(18, OUTPUT);
 
   setWaterPump(false, "System Boot");
   setFertPump(false, "System Boot");
