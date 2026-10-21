@@ -572,7 +572,7 @@ void processAutomation() {
 
 // ==================== MQTT MESSAGING ====================
 void publishTelemetry() {
-  StaticJsonDocument<768> doc;
+  StaticJsonDocument<1536> doc;
   doc["dev"]      = deviceId;
   doc["time"]     = currentTimeStr;
   doc["soil"]     = soilPercent;
@@ -611,13 +611,23 @@ void publishTelemetry() {
     s["tgt"] = schedules[i].target; // 0=Water, 1=Fert, 2=Both
   }
 
-  char buffer[768];
+  char buffer[1536];
   size_t n = serializeJson(doc, buffer);
-  mqttClient.publish(topicTelemetry, buffer, n);
+  bool ok = mqttClient.publish(topicTelemetry, buffer, n);
+  if (!ok) {
+    Serial.printf("[MQTT ERR] Telemetry publish failed! n=%u, bufSize=%u, state=%d\n", 
+                  (unsigned int)n, mqttClient.getBufferSize(), mqttClient.state());
+  } else {
+    static unsigned long lastStatusPulse = 0;
+    if (millis() - lastStatusPulse > 10000) {
+      lastStatusPulse = millis();
+      mqttClient.publish(topicStatus, "{\"online\":true}", true);
+    }
+  }
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  StaticJsonDocument<768> doc;
+  StaticJsonDocument<1024> doc;
   DeserializationError error = deserializeJson(doc, payload, length);
   if (error) {
     Serial.print("[MQTT] JSON parse error: ");
@@ -795,6 +805,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 void connectMQTT() {
   if (mqttClient.connected()) return;
 
+  mqttClient.setBufferSize(2048);
+
   Serial.print("[MQTT] Connecting to broker ");
   Serial.print(MQTT_BROKER);
   Serial.print(" as ");
@@ -875,7 +887,7 @@ void setup() {
     // Setup MQTT & NTP
     mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
     mqttClient.setCallback(mqttCallback);
-    mqttClient.setBufferSize(512);
+    mqttClient.setBufferSize(2048);
     mqttClient.setKeepAlive(60);
     mqttClient.setSocketTimeout(15);
 
