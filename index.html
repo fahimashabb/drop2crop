@@ -199,6 +199,12 @@
           <span id="cloudText">Connecting</span>
         </div>
 
+        <!-- Alert System Manager Toggle (Mute / Unmute Alarms & Offline Banners) -->
+        <button id="alertSystemBtn" onclick="toggleAlertSystem()" class="px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 transition text-xs font-semibold flex items-center gap-1.5" title="Manage Alert System (Turn ON/OFF notifications & offline banner)">
+          <span id="alertSystemIcon">🔔</span>
+          <span id="alertSystemText" class="hidden sm:inline">Alerts ON</span>
+        </button>
+
         <!-- Hardware Diagnostic Guide Modal Trigger -->
         <button onclick="toggleDiagModal()" class="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 transition text-xs font-semibold flex items-center gap-1.5" title="Hardware Health & Diagnostics">
           <span>🩺</span>
@@ -225,6 +231,20 @@
 
     <!-- CRITICAL ALERT BANNERS -->
     <div id="alertsContainer" class="space-y-3">
+      <!-- Subtle Banner when Alerts are Muted -->
+      <div id="alertsMutedBanner" class="hidden glass-card px-4 py-2.5 rounded-2xl border border-amber-500/30 bg-amber-950/20 flex items-center justify-between gap-3 text-xs text-amber-200 shadow-md">
+        <div class="flex items-center gap-2.5">
+          <span class="text-lg">🔕</span>
+          <div>
+            <span class="font-bold">Alert System is Muted:</span>
+            <span class="text-amber-300/80 ml-1">Offline banner and warning alarms are silenced so you can work uninterrupted.</span>
+          </div>
+        </div>
+        <button onclick="toggleAlertSystem(false)" class="px-3 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-semibold text-[11px] transition">
+          Unmute Alerts
+        </button>
+      </div>
+
       <!-- Device Offline / Turned Off Warning Banner -->
       <div id="deviceOfflineBanner" class="glass-card p-4 rounded-2xl border-l-4 border-l-rose-500 bg-rose-950/40 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg shadow-rose-950/30">
         <div class="flex items-center gap-3">
@@ -245,6 +265,10 @@
           <span id="deviceLastSeenBadge" class="text-xs font-mono font-semibold px-3 py-1.5 rounded-xl bg-slate-900 border border-rose-500/30 text-rose-300">
             Last Active: Checking...
           </span>
+          <button onclick="toggleAlertSystem(true)" class="px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-600/50 text-slate-200 text-xs font-semibold transition flex items-center gap-1" title="Silence this alert">
+            <span>🔕</span>
+            <span>Mute</span>
+          </button>
           <button onclick="toggleDiagModal()" class="px-3 py-1.5 rounded-xl bg-rose-800/60 hover:bg-rose-700 border border-rose-600/40 text-rose-100 text-xs font-semibold transition">
             Check Diagnostics
           </button>
@@ -588,7 +612,7 @@
       <button onclick="toggleTerminal()" class="w-full p-4 text-xs font-mono text-slate-400 flex items-center justify-between hover:text-slate-200 transition">
         <span class="flex items-center gap-2">
           <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-          Live Cloud Telemetry (test.mosquitto.org)
+          Live Cloud Telemetry (broker.emqx.io)
         </span>
         <span id="termToggleIcon">▼</span>
       </button>
@@ -700,7 +724,7 @@
 
         <div>
           <label class="block text-slate-400 mb-1">MQTT WebSocket Broker URL</label>
-          <input type="text" id="cfgBroker" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" value="wss://test.mosquitto.org:8081">
+          <input type="text" id="cfgBroker" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" value="wss://broker.emqx.io:8084/mqtt">
         </div>
 
         <!-- Station Security & PIN Management -->
@@ -809,8 +833,24 @@
             <span>⚡ 4. Relay Mechanical "Click" Test</span>
           </div>
           <p class="text-slate-300 leading-relaxed">
-            Switch to <strong>Mode 3 (Manual Cloud)</strong> and press "Turn ON Pump". You will hear an audible mechanical <em>"CLICK"</em> from the relay cube, and the channel 1 LED on the relay board will turn ON.
+            Switch to <strong>Mode 3 (Manual Cloud)</strong> and press "Turn ON Pump". You will hear an audible mechanical <em>"CLICK"</em> from the relay cube, and the channel 1 LED on the relay board will turn ON. You can also run the automated Diagnostic Pulse test from the controls card.
           </p>
+        </div>
+
+        <!-- 5. Relay Pins & Wiring Check -->
+        <div class="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 space-y-1.5">
+          <div class="font-bold text-emerald-400 flex items-center gap-2 text-sm">
+            <span>🔌 5. Recommended GPIO Ports & Relay Wiring</span>
+          </div>
+          <p class="text-slate-300 leading-relaxed">
+            The firmware drives dual GPIO pairs simultaneously so you can plug your relay signal wires into either port:
+          </p>
+          <ul class="text-slate-300 space-y-1 list-disc list-inside font-mono text-[11px] bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+            <li><span class="text-emerald-400 font-bold">Relay IN1 (Clean Water Pump):</span> Connect to <b>GPIO 17</b> (or GPIO 9)</li>
+            <li><span class="text-emerald-400 font-bold">Relay IN2 (Fertigation Pump):</span> Connect to <b>GPIO 18</b> (or GPIO 10)</li>
+            <li><span class="text-amber-400 font-bold">Relay VCC:</span> Connect to <b>5Vin</b> (5V rail) — NOT 3.3V!</li>
+            <li><span class="text-sky-400 font-bold">Relay Blue Jumper:</span> Keep attached across <b>JD-VCC & VCC</b></li>
+          </ul>
         </div>
       </div>
 
@@ -868,8 +908,15 @@
   <script>
     // Configuration
     let DEVICE_ID = localStorage.getItem('drop2crop_dev_id') || 'drop2crop_2884858a2564';
-    let BROKER_URL = localStorage.getItem('drop2crop_broker') || 'wss://test.mosquitto.org:8081';
+    let BROKER_URL = localStorage.getItem('drop2crop_broker');
+    if (!BROKER_URL || BROKER_URL.includes('mosquitto.org')) {
+      BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
+      localStorage.setItem('drop2crop_broker', BROKER_URL);
+    }
     let STATION_PIN = localStorage.getItem('drop2crop_pin') || '2564';
+
+    // Alert System State (Muted vs Active)
+    let isAlertsMuted = localStorage.getItem('drop2crop_alerts_muted') === 'true';
 
     let isAuthenticated = false;
     let failedAttempts = 0;
@@ -1056,6 +1103,7 @@
     }
 
     function triggerWarningAlarm() {
+      if (isAlertsMuted || !soundEnabled) return;
       const now = Date.now();
       if (now - lastAlertSoundTime > 15000) {
         lastAlertSoundTime = now;
@@ -1067,6 +1115,42 @@
     function toggleSound() {
       soundEnabled = !soundEnabled;
       document.getElementById('soundIcon').innerText = soundEnabled ? '🔊' : '🔇';
+    }
+
+    function updateAlertSystemUI() {
+      const btn = document.getElementById('alertSystemBtn');
+      const icon = document.getElementById('alertSystemIcon');
+      const text = document.getElementById('alertSystemText');
+      const mutedBanner = document.getElementById('alertsMutedBanner');
+      const offlineBanner = document.getElementById('deviceOfflineBanner');
+
+      if (isAlertsMuted) {
+        if (btn) btn.className = 'px-2.5 py-1.5 rounded-xl bg-amber-950/60 border border-amber-500/50 text-amber-300 hover:bg-amber-900/60 transition text-xs font-semibold flex items-center gap-1.5 shadow-sm';
+        if (icon) icon.innerText = '🔕';
+        if (text) text.innerText = 'Alerts Muted';
+        if (mutedBanner) mutedBanner.classList.remove('hidden');
+        if (offlineBanner) offlineBanner.classList.add('hidden');
+        soundEnabled = false;
+        const soundIcon = document.getElementById('soundIcon');
+        if (soundIcon) soundIcon.innerText = '🔇';
+      } else {
+        if (btn) btn.className = 'px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 transition text-xs font-semibold flex items-center gap-1.5';
+        if (icon) icon.innerText = '🔔';
+        if (text) text.innerText = 'Alerts ON';
+        if (mutedBanner) mutedBanner.classList.add('hidden');
+        if (!isDeviceOnline && offlineBanner) offlineBanner.classList.remove('hidden');
+      }
+    }
+
+    function toggleAlertSystem(targetState) {
+      if (typeof targetState === 'boolean') {
+        isAlertsMuted = targetState;
+      } else {
+        isAlertsMuted = !isAlertsMuted;
+      }
+      localStorage.setItem('drop2crop_alerts_muted', isAlertsMuted ? 'true' : 'false');
+      updateAlertSystemUI();
+      logTerm(`Alert System: ${isAlertsMuted ? 'MUTED (Offline/warning banners silenced)' : 'ACTIVE (Alerts ON)'}`);
     }
 
     function toggleConfigModal() {
@@ -1191,12 +1275,18 @@
         isDeviceOnline = false;
         if (pill) pill.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-rose-500/15 border border-rose-500/40 text-rose-400 transition-all shadow-sm';
         if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
-        if (text) text.innerText = 'The Device is Not Online';
+        if (text) text.innerText = isAlertsMuted ? 'Device Offline (Muted)' : 'The Device is Not Online';
         if (sub) {
           sub.innerText = '(Turned Off)';
           sub.className = 'text-[10px] text-rose-300/80 hidden sm:inline font-mono';
         }
-        if (banner) banner.classList.remove('hidden');
+        if (banner) {
+          if (isAlertsMuted) {
+            banner.classList.add('hidden');
+          } else {
+            banner.classList.remove('hidden');
+          }
+        }
 
         if (badge) {
           if (lastTelemetryTimestamp > 0) {
@@ -1219,13 +1309,13 @@
     setInterval(() => {
       if (lastTelemetryTimestamp > 0) {
         const diff = Date.now() - lastTelemetryTimestamp;
-        if (diff > 15000) {
-          updateDeviceOnlineState(false, 'Heartbeat timeout (>15s)');
+        if (diff > 30000) {
+          updateDeviceOnlineState(false, 'Heartbeat timeout (>30s)');
         } else {
           updateDeviceOnlineState(true);
         }
       } else {
-        updateDeviceOnlineState(false, 'No initial message');
+        updateDeviceOnlineState(false, 'Waiting for initial telemetry');
       }
     }, 1000);
 
@@ -1310,9 +1400,12 @@
 
       client.on('close', () => {
         if (cloudPill) cloudPill.className = 'hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium bg-slate-800 border border-slate-700 text-slate-400';
-        if (cloudDot) cloudDot.className = 'w-1.5 h-1.5 rounded-full bg-rose-400';
-        if (cloudText) cloudText.innerText = 'Cloud Disconnected';
-        updateDeviceOnlineState(false, 'Broker disconnected');
+        if (cloudDot) cloudDot.className = 'w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse';
+        if (cloudText) cloudText.innerText = 'Cloud Reconnecting...';
+        // Only trigger offline status if telemetry hasn't arrived for > 30s
+        if (Date.now() - lastTelemetryTimestamp > 30000) {
+          updateDeviceOnlineState(false, 'Broker disconnected & heartbeat stale');
+        }
       });
     }
 
@@ -1654,6 +1747,7 @@
     // Initialize on page load
     window.addEventListener('load', () => {
       checkInitialAuth();
+      updateAlertSystemUI();
       connectMQTT();
 
       document.getElementById('pinInput')?.addEventListener('keydown', (e) => {

@@ -4,7 +4,7 @@
 [![ESP32-S3](https://img.shields.io/badge/Hardware-ESP32--S3-blue.svg?logo=espressif)](https://www.espressif.com/)
 [![GitHub Pages](https://img.shields.io/badge/Live_Dashboard-GitHub_Pages-brightgreen.svg?logo=github)](https://fahimashabb.github.io/drop2crop/)
 [![Dual Motors](https://img.shields.io/badge/Actuators-Water%20%2B%20Fertigation-emerald.svg)](https://fahimashabb.github.io/drop2crop/)
-[![MQTT](https://img.shields.io/badge/Protocol-MQTT%20over%20WSS-orange.svg)](https://mosquitto.org/)
+[![MQTT](https://img.shields.io/badge/Protocol-MQTT%20WSS%20(EMQX)-orange.svg)](https://www.emqx.com/)
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
 > **Drop2Crop** is a commercial-grade, zero-cost cloud irrigation and fertigation system designed for precision agriculture in Bangladesh. It connects an **ESP32-S3** microcontroller in the field to a real-time, high-speed single-page web dashboard hosted on **GitHub Pages**, allowing farmers and operators to independently manage clean water irrigation and fertilizer dosing, monitor soil moisture, reservoir levels, and rain status from anywhere in the country with sub-second latency.
@@ -49,8 +49,8 @@ Comprehensive, print-ready technical manuals are included in this repository:
 | | ECHO | `GPIO 8` | Input | Ultrasonic receiver pulse return width |
 | **5V 2-Channel Relay** | VCC | `5V / VIN` | 5.0V DC | Powers coil circuitry (Breadboard 5V rail) |
 | | GND | `GND` | 0V | Common logic ground bus |
-| | IN1 | `GPIO 9` | Active LOW | Relay Channel 1: **Motor 1 (Clean Water Pump)** |
-| | IN2 | `GPIO 10` | Active LOW | Relay Channel 2: **Motor 2 (Fertigation Pump)** |
+| | IN1 | `GPIO 17` (Mirrored: `GPIO 9`) | Active LOW | Relay Channel 1: **Motor 1 (Clean Water Pump)** |
+| | IN2 | `GPIO 18` (Mirrored: `GPIO 10`) | Active LOW | Relay Channel 2: **Motor 2 (Fertigation Pump)** |
 | **Motor 1: Clean Water** | (+) Red | Relay 1 `NO1` | +12V Switched | Switched from 12V+ via Relay 1 COM1 |
 | | (-) Black | 12V Adapter (-) | 0V (12V Ret) | Direct connection to 12V DC power supply ground |
 | **Motor 2: Fertigation** | (+) Red | Relay 2 `NO2` | +12V Switched | Switched from 12V+ via Relay 2 COM2 |

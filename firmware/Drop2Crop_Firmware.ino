@@ -29,8 +29,15 @@
 #define PIN_RAIN_ANALOG      6   // Rain Sensor Analog (AO)
 #define PIN_TRIG             7   // HC-SR04 Trigger
 #define PIN_ECHO             8   // HC-SR04 Echo
-#define PIN_RELAY_PUMP       9   // Relay 1: Water Pump (Active LOW)
-#define PIN_RELAY_VALVE      10  // Relay 2: Aux/Fertigation (Active LOW)
+
+// Primary Relays (GPIO 17 & 18 - Clean, Non-conflicting Dedicated Outputs)
+#define PIN_RELAY_PUMP       17  // Primary Relay 1: Clean Water Pump (Active LOW)
+#define PIN_RELAY_VALVE      18  // Primary Relay 2: Aux/Fertigation (Active LOW)
+
+// Mirrored Relays (GPIO 9 & 10 - Driven in parallel so either wiring works seamlessly)
+#define PIN_RELAY_PUMP_ALT    9  // Alternate Relay 1: Clean Water Pump
+#define PIN_RELAY_VALVE_ALT  10  // Alternate Relay 2: Aux/Fertigation
+
 #define PIN_BOOT_BUTTON      0   // Onboard BOOT Button for WiFi Reset
 
 // ==================== CALIBRATION & THRESHOLDS ====================
@@ -92,7 +99,7 @@ const byte DNS_PORT = 53;
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
-const char* MQTT_BROKER = "test.mosquitto.org";
+const char* MQTT_BROKER = "broker.emqx.io";
 const int   MQTT_PORT   = 1883;
 
 char deviceId[32] = "drop2crop_2884858a2564";
@@ -331,6 +338,7 @@ void setWaterPump(bool state, const char* reason = "Manual") {
     Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: Tank < 15%% empty! (Safety Active)\n", reason);
     pumpWaterActive = false;
     digitalWrite(PIN_RELAY_PUMP, offLevel);
+    digitalWrite(PIN_RELAY_PUMP_ALT, offLevel);
     return;
   }
 
@@ -338,14 +346,16 @@ void setWaterPump(bool state, const char* reason = "Manual") {
     Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: 24h Rain Lockout! (Safety Active)\n", reason);
     pumpWaterActive = false;
     digitalWrite(PIN_RELAY_PUMP, offLevel);
+    digitalWrite(PIN_RELAY_PUMP_ALT, offLevel);
     return;
   }
 
   pumpWaterActive = state;
   int drivePinLevel = pumpWaterActive ? onLevel : offLevel;
   digitalWrite(PIN_RELAY_PUMP, drivePinLevel);
-  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pin %d = %s, Trigger: %s%s)\n", 
-                pumpWaterActive ? "ON" : "OFF", PIN_RELAY_PUMP, drivePinLevel == LOW ? "LOW" : "HIGH",
+  digitalWrite(PIN_RELAY_PUMP_ALT, drivePinLevel);
+  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pins %d & %d = %s, Trigger: %s%s)\n", 
+                pumpWaterActive ? "ON" : "OFF", PIN_RELAY_PUMP, PIN_RELAY_PUMP_ALT, drivePinLevel == LOW ? "LOW" : "HIGH",
                 reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
 }
 
@@ -357,6 +367,7 @@ void setFertPump(bool state, const char* reason = "Manual") {
     Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: Tank < 15%% empty! (Safety Active)\n", reason);
     pumpFertActive = false;
     digitalWrite(PIN_RELAY_VALVE, offLevel);
+    digitalWrite(PIN_RELAY_VALVE_ALT, offLevel);
     return;
   }
 
@@ -364,14 +375,16 @@ void setFertPump(bool state, const char* reason = "Manual") {
     Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: 24h Rain Lockout! (Safety Active)\n", reason);
     pumpFertActive = false;
     digitalWrite(PIN_RELAY_VALVE, offLevel);
+    digitalWrite(PIN_RELAY_VALVE_ALT, offLevel);
     return;
   }
 
   pumpFertActive = state;
   int drivePinLevel = pumpFertActive ? onLevel : offLevel;
   digitalWrite(PIN_RELAY_VALVE, drivePinLevel);
-  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pin %d = %s, Trigger: %s%s)\n", 
-                pumpFertActive ? "ON" : "OFF", PIN_RELAY_VALVE, drivePinLevel == LOW ? "LOW" : "HIGH",
+  digitalWrite(PIN_RELAY_VALVE_ALT, drivePinLevel);
+  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pins %d & %d = %s, Trigger: %s%s)\n", 
+                pumpFertActive ? "ON" : "OFF", PIN_RELAY_VALVE, PIN_RELAY_VALVE_ALT, drivePinLevel == LOW ? "LOW" : "HIGH",
                 reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
 }
 
@@ -643,17 +656,21 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   // Mechanical Click Diagnostic Test: Pulses Relay 1 & Relay 2 to test coils
   if (doc.containsKey("clickTest")) {
-    Serial.println("[TEST] Starting Relay Mechanical Click Diagnostic...");
+    Serial.println("[TEST] Starting Relay Mechanical Click Diagnostic (Dual GPIO 17/9 & 18/10)...");
     for (int i = 0; i < 3; i++) {
       digitalWrite(PIN_RELAY_PUMP, relayActiveLow ? LOW : HIGH);
+      digitalWrite(PIN_RELAY_PUMP_ALT, relayActiveLow ? LOW : HIGH);
       delay(400);
       digitalWrite(PIN_RELAY_PUMP, relayActiveLow ? HIGH : LOW);
+      digitalWrite(PIN_RELAY_PUMP_ALT, relayActiveLow ? HIGH : LOW);
       delay(400);
     }
     for (int i = 0; i < 3; i++) {
       digitalWrite(PIN_RELAY_VALVE, relayActiveLow ? LOW : HIGH);
+      digitalWrite(PIN_RELAY_VALVE_ALT, relayActiveLow ? LOW : HIGH);
       delay(400);
       digitalWrite(PIN_RELAY_VALVE, relayActiveLow ? HIGH : LOW);
+      digitalWrite(PIN_RELAY_VALVE_ALT, relayActiveLow ? HIGH : LOW);
       delay(400);
     }
     setWaterPump(pumpWaterActive, "Test Completed");
@@ -784,8 +801,8 @@ void connectMQTT() {
   Serial.println(deviceId);
 
   // Connect with Last Will and Testament (LWT)
-  // When ESP32 loses power or unplugs, broker automatically broadcasts {"online":false}
-  if (mqttClient.connect(deviceId, topicStatus, 0, false, "{\"online\":false}")) {
+  // When ESP32 loses power or unplugs, broker automatically broadcasts retained {"online":false}
+  if (mqttClient.connect(deviceId, topicStatus, 0, true, "{\"online\":false}")) {
     Serial.println("[MQTT] Connected to Cloud Broker!");
     // Publish retained online status so web clients connecting later instantly see the online state
     mqttClient.publish(topicStatus, "{\"online\":true}", true);
@@ -836,6 +853,8 @@ void setup() {
 
   pinMode(PIN_RELAY_PUMP, OUTPUT);
   pinMode(PIN_RELAY_VALVE, OUTPUT);
+  pinMode(PIN_RELAY_PUMP_ALT, OUTPUT);
+  pinMode(PIN_RELAY_VALVE_ALT, OUTPUT);
 
   setWaterPump(false, "System Boot");
   setFertPump(false, "System Boot");
