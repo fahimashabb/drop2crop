@@ -80,6 +80,7 @@ Preferences preferences;
 
 String wifiSSID = "Dracarys";
 String wifiPass = "itsanewform";
+String devicePasscode = "2564"; // Default security PIN (last 4 digits of device MAC)
 
 bool inAPMode = false;
 WebServer server(80);
@@ -134,8 +135,10 @@ void loadCredentials() {
   preferences.begin("d2c_cfg", false);
   wifiSSID = preferences.getString("ssid", "Dracarys");
   wifiPass = preferences.getString("pass", "itsanewform");
+  devicePasscode = preferences.getString("pin", "2564");
   preferences.end();
   Serial.printf("[NVS] Loaded WiFi Config: SSID='%s'\n", wifiSSID.c_str());
+  Serial.printf("[NVS] Station Security PIN configured: '%s'\n", devicePasscode.c_str());
 
   preferences.begin("d2c_sched", false);
   numSchedules = preferences.getInt("count", 0);
@@ -171,6 +174,14 @@ void saveWifiCredentials(const String& s, const String& p) {
   preferences.putString("pass", p);
   preferences.end();
   Serial.println("[NVS] New WiFi credentials saved to Flash!");
+}
+
+void savePasscode(const String& newPin) {
+  preferences.begin("d2c_cfg", false);
+  preferences.putString("pin", newPin);
+  preferences.end();
+  devicePasscode = newPin;
+  Serial.printf("[SECURITY] Security PIN updated in Flash NVS: %s\n", devicePasscode.c_str());
 }
 
 void saveSchedulesToNVS() {
@@ -225,6 +236,9 @@ const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"rawliteral(
       
       <label for="pass">Wi-Fi Password</label>
       <input type="password" id="pass" name="pass" placeholder="Enter Password">
+
+      <label for="pin">Security PIN (Optional - Default: 2564)</label>
+      <input type="text" id="pin" name="pin" placeholder="Leave empty for current or set 4-digit PIN">
       
       <button type="submit" class="btn">Connect & Save to Memory</button>
     </form>
@@ -253,9 +267,13 @@ void startCaptivePortal() {
   server.on("/save", HTTP_POST, []() {
     String newSSID = server.arg("ssid");
     String newPass = server.arg("pass");
+    String newPIN  = server.arg("pin");
     if (newSSID.length() > 0) {
       saveWifiCredentials(newSSID, newPass);
-      server.send(200, "text/html", "<html><body style='background:#0f172a;color:#10b981;font-family:sans-serif;text-align:center;padding:40px;'><h2>WiFi Saved!</h2><p style='color:#fff;'>Rebooting and connecting to " + newSSID + "...</p></body></html>");
+      if (newPIN.length() >= 4) {
+        savePasscode(newPIN);
+      }
+      server.send(200, "text/html", "<html><body style='background:#0f172a;color:#10b981;font-family:sans-serif;text-align:center;padding:40px;'><h2>Settings Saved!</h2><p style='color:#fff;'>Rebooting and connecting to " + newSSID + "...</p></body></html>");
       delay(2000);
       ESP.restart();
     } else {
@@ -514,6 +532,24 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     Serial.print("[MQTT] JSON parse error: ");
     Serial.println(error.c_str());
     return;
+  }
+
+  // Security Verification: Every incoming control command MUST include matching "auth" PIN
+  const char* authPin = doc["auth"] | "";
+  if (strcmp(authPin, devicePasscode.c_str()) != 0) {
+    Serial.printf("[SECURITY ALERT] Unauthorized command rejected! Provided auth '%s' does not match device PIN.\n", authPin);
+    mqttClient.publish(topicStatus, "{\"security\":\"UNAUTHORIZED_COMMAND_REJECTED\"}");
+    return;
+  }
+
+  // Allow updating the PIN from the authenticated app
+  if (doc.containsKey("newPin")) {
+    const char* np = doc["newPin"];
+    if (strlen(np) >= 4) {
+      savePasscode(String(np));
+      publishTelemetry();
+      return;
+    }
   }
 
   if (doc.containsKey("pump")) {

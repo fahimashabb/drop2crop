@@ -92,6 +92,77 @@
 </head>
 <body class="p-3 sm:p-5 md:p-8 flex flex-col items-center">
 
+  <!-- SECURITY AUTHENTICATION LOCKSCREEN -->
+  <div id="lockScreen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-xl transition-all duration-300">
+    <div class="glass-card max-w-md w-full p-6 sm:p-8 rounded-3xl border border-slate-700/80 bg-slate-900/95 shadow-2xl space-y-5 text-center relative overflow-hidden">
+      <!-- Top Decorative Glow -->
+      <div class="absolute -top-16 left-1/2 -translate-x-1/2 w-48 h-48 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none"></div>
+
+      <!-- Station Shield Header -->
+      <div class="space-y-2 relative">
+        <div class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-tr from-emerald-600/30 to-emerald-400/10 border border-emerald-500/40 flex items-center justify-center text-3xl shadow-lg shadow-emerald-500/10">
+          🔒
+        </div>
+        <h2 class="text-2xl font-bold font-display text-white tracking-tight">Drop2Crop Security Gateway</h2>
+        <p class="text-xs text-slate-400 max-w-xs mx-auto">
+          Central Station Authorization Required for <span class="text-emerald-400 font-mono font-medium">drop2crop_2884858a2564</span>
+        </p>
+      </div>
+
+      <!-- PIN Input Field -->
+      <div class="space-y-3">
+        <div class="relative">
+          <input type="password" id="pinInput" maxlength="16" placeholder="Enter Security PIN"
+            class="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-2xl px-4 py-3 text-center text-2xl font-mono tracking-widest text-white focus:outline-none transition shadow-inner">
+          <button type="button" onclick="togglePinVisibility()" class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-base" title="Show / Hide PIN">
+            <span id="pinEyeIcon">👁️</span>
+          </button>
+        </div>
+
+        <!-- Alert messages -->
+        <div id="pinErrorMsg" class="hidden text-xs text-rose-300 font-semibold bg-rose-500/20 border border-rose-500/40 rounded-xl py-2 px-3 animate-pulse">
+          Incorrect PIN! Default factory PIN is 2564.
+        </div>
+        <div id="cooldownNotice" class="hidden text-xs text-amber-300 font-semibold bg-amber-500/20 border border-amber-500/40 rounded-xl py-2 px-3">
+          Too many attempts. Locked out for <span id="cooldownSec">30</span>s.
+        </div>
+      </div>
+
+      <!-- Touch Keypad (Mobile / Touch Friendly) -->
+      <div class="grid grid-cols-3 gap-2 max-w-[280px] mx-auto pt-1">
+        <button type="button" onclick="pressKey('1')" class="h-11 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white font-mono font-bold text-lg border border-slate-700/60 active:scale-95 transition">1</button>
+        <button type="button" onclick="pressKey('2')" class="h-11 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white font-mono font-bold text-lg border border-slate-700/60 active:scale-95 transition">2</button>
+        <button type="button" onclick="pressKey('3')" class="h-11 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white font-mono font-bold text-lg border border-slate-700/60 active:scale-95 transition">3</button>
+        <button type="button" onclick="pressKey('4')" class="h-11 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white font-mono font-bold text-lg border border-slate-700/60 active:scale-95 transition">4</button>
+        <button type="button" onclick="pressKey('5')" class="h-11 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white font-mono font-bold text-lg border border-slate-700/60 active:scale-95 transition">5</button>
+        <button type="button" onclick="pressKey('6')" class="h-11 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white font-mono font-bold text-lg border border-slate-700/60 active:scale-95 transition">6</button>
+        <button type="button" onclick="pressKey('7')" class="h-11 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white font-mono font-bold text-lg border border-slate-700/60 active:scale-95 transition">7</button>
+        <button type="button" onclick="pressKey('8')" class="h-11 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white font-mono font-bold text-lg border border-slate-700/60 active:scale-95 transition">8</button>
+        <button type="button" onclick="pressKey('9')" class="h-11 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white font-mono font-bold text-lg border border-slate-700/60 active:scale-95 transition">9</button>
+        <button type="button" onclick="clearPinInput()" class="h-11 rounded-xl bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 font-mono font-bold text-xs border border-rose-500/30 active:scale-95 transition">CLEAR</button>
+        <button type="button" onclick="pressKey('0')" class="h-11 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white font-mono font-bold text-lg border border-slate-700/60 active:scale-95 transition">0</button>
+        <button type="button" onclick="backspacePin()" class="h-11 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-white font-mono font-bold text-lg border border-slate-700/60 active:scale-95 transition">⌫</button>
+      </div>
+
+      <!-- Options & Unlock Button -->
+      <div class="space-y-3 pt-1">
+        <label class="flex items-center justify-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+          <input type="checkbox" id="rememberDeviceCheck" class="rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-0">
+          <span>Remember this device (Keep unlocked)</span>
+        </label>
+
+        <button type="button" onclick="attemptUnlock()" id="unlockBtn"
+          class="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition shadow-lg shadow-emerald-600/30 active:scale-98">
+          Unlock Station
+        </button>
+
+        <p class="text-[11px] text-slate-500">
+          Default Factory PIN: <strong class="text-slate-400 font-mono">2564</strong> (You can change it in Settings)
+        </p>
+      </div>
+    </div>
+  </div>
+
   <!-- Main Container -->
   <div class="w-full max-w-5xl space-y-6">
 
@@ -137,6 +208,12 @@
         <!-- Audio Alert Toggle -->
         <button id="soundBtn" onclick="toggleSound()" class="p-2 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 transition text-sm flex items-center gap-1.5" title="Toggle Audio Alarms">
           <span id="soundIcon">🔊</span>
+        </button>
+
+        <!-- Lock Station Quick Button -->
+        <button onclick="lockStation()" class="px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-rose-950/40 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 transition text-xs font-semibold flex items-center gap-1.5" title="Lock Central Station">
+          <span>🔒</span>
+          <span class="hidden sm:inline">Lock</span>
         </button>
 
         <!-- Device Settings Modal Trigger -->
@@ -487,6 +564,36 @@
           <label class="block text-slate-400 mb-1">MQTT WebSocket Broker URL</label>
           <input type="text" id="cfgBroker" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" value="wss://test.mosquitto.org:8081">
         </div>
+
+        <!-- Station Security & PIN Management -->
+        <div class="border-t border-slate-800 pt-3 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-200 text-xs flex items-center gap-1.5 uppercase tracking-wider">
+              <span>🔐</span> Station Security PIN
+            </span>
+            <span class="text-[10px] text-emerald-400 font-mono">Protected</span>
+          </div>
+
+          <div>
+            <label class="block text-slate-400 mb-1">Current PIN / Passcode</label>
+            <input type="password" id="cfgCurrentPin" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" placeholder="Default is 2564">
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-slate-400 mb-1">New PIN</label>
+              <input type="password" id="cfgNewPin" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" placeholder="Min 4 digits">
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">Confirm New PIN</label>
+              <input type="password" id="cfgConfirmPin" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500" placeholder="Re-enter">
+            </div>
+          </div>
+
+          <button type="button" onclick="updateSecurityPin()" class="w-full py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-emerald-400 transition flex items-center justify-center gap-1.5">
+            <span>💾</span> Save New PIN to ESP32 & Browser
+          </button>
+        </div>
       </div>
 
       <div class="flex justify-end gap-2 pt-2">
@@ -565,6 +672,156 @@
     // Configuration
     let DEVICE_ID = localStorage.getItem('drop2crop_dev_id') || 'drop2crop_2884858a2564';
     let BROKER_URL = localStorage.getItem('drop2crop_broker') || 'wss://test.mosquitto.org:8081';
+    let STATION_PIN = localStorage.getItem('drop2crop_pin') || '2564';
+
+    let isAuthenticated = false;
+    let failedAttempts = 0;
+    let lockoutTimer = null;
+    let isLockedOut = false;
+
+    // Check Initial Authentication on App Load
+    function checkInitialAuth() {
+      const sessionAuth = sessionStorage.getItem('d2c_auth_token');
+      const rememberAuth = localStorage.getItem('d2c_remember_auth');
+      if (sessionAuth === 'true' || rememberAuth === 'true') {
+        isAuthenticated = true;
+        document.getElementById('lockScreen').classList.add('hidden');
+      } else {
+        isAuthenticated = false;
+        document.getElementById('lockScreen').classList.remove('hidden');
+        setTimeout(() => document.getElementById('pinInput')?.focus(), 250);
+      }
+    }
+
+    function togglePinVisibility() {
+      const input = document.getElementById('pinInput');
+      const icon = document.getElementById('pinEyeIcon');
+      if (input.type === 'password') {
+        input.type = 'text';
+        icon.innerText = '🙈';
+      } else {
+        input.type = 'password';
+        icon.innerText = '👁️';
+      }
+    }
+
+    function pressKey(num) {
+      if (isLockedOut) return;
+      const input = document.getElementById('pinInput');
+      if (input.value.length < 16) {
+        input.value += num;
+      }
+    }
+
+    function clearPinInput() {
+      if (isLockedOut) return;
+      document.getElementById('pinInput').value = '';
+    }
+
+    function backspacePin() {
+      if (isLockedOut) return;
+      const input = document.getElementById('pinInput');
+      input.value = input.value.slice(0, -1);
+    }
+
+    function attemptUnlock() {
+      if (isLockedOut) return;
+      const input = document.getElementById('pinInput').value.trim();
+      const errBox = document.getElementById('pinErrorMsg');
+
+      if (input === STATION_PIN) {
+        isAuthenticated = true;
+        failedAttempts = 0;
+        sessionStorage.setItem('d2c_auth_token', 'true');
+        if (document.getElementById('rememberDeviceCheck').checked) {
+          localStorage.setItem('d2c_remember_auth', 'true');
+        } else {
+          localStorage.removeItem('d2c_remember_auth');
+        }
+        playBeep(1200, 'sine', 0.12);
+        document.getElementById('lockScreen').classList.add('hidden');
+        errBox.classList.add('hidden');
+        logTerm('Security: Central Station unlocked.');
+      } else {
+        failedAttempts++;
+        playBeep(320, 'sawtooth', 0.25);
+        errBox.innerText = `Incorrect PIN! (${failedAttempts}/5 attempts). Default is 2564.`;
+        errBox.classList.remove('hidden');
+
+        if (failedAttempts >= 5) {
+          triggerLockout();
+        }
+      }
+    }
+
+    function triggerLockout() {
+      isLockedOut = true;
+      let remaining = 30;
+      const notice = document.getElementById('cooldownNotice');
+      const secSpan = document.getElementById('cooldownSec');
+      const unlockBtn = document.getElementById('unlockBtn');
+      notice.classList.remove('hidden');
+      unlockBtn.disabled = true;
+      unlockBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+      lockoutTimer = setInterval(() => {
+        remaining--;
+        secSpan.innerText = remaining;
+        if (remaining <= 0) {
+          clearInterval(lockoutTimer);
+          isLockedOut = false;
+          failedAttempts = 0;
+          notice.classList.add('hidden');
+          unlockBtn.disabled = false;
+          unlockBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+      }, 1000);
+    }
+
+    function lockStation() {
+      isAuthenticated = false;
+      sessionStorage.removeItem('d2c_auth_token');
+      localStorage.removeItem('d2c_remember_auth');
+      document.getElementById('pinInput').value = '';
+      document.getElementById('lockScreen').classList.remove('hidden');
+      logTerm('Security: Station locked.');
+    }
+
+    function updateSecurityPin() {
+      const current = document.getElementById('cfgCurrentPin').value.trim();
+      const newPin = document.getElementById('cfgNewPin').value.trim();
+      const confirm = document.getElementById('cfgConfirmPin').value.trim();
+
+      if (current !== STATION_PIN) {
+        alert('Current PIN is incorrect! Default is 2564.');
+        return;
+      }
+      if (newPin.length < 4) {
+        alert('New PIN must be at least 4 digits/characters.');
+        return;
+      }
+      if (newPin !== confirm) {
+        alert('New PIN and Confirmation PIN do not match!');
+        return;
+      }
+
+      // Send authenticated PIN update command to ESP32 firmware
+      if (client && client.connected) {
+        const payload = JSON.stringify({
+          auth: current,
+          newPin: newPin
+        });
+        client.publish(TOPIC_COMMAND, payload);
+        logTerm(`Tx -> Update Device PIN on ESP32 to: ${newPin}`);
+      }
+
+      STATION_PIN = newPin;
+      localStorage.setItem('drop2crop_pin', newPin);
+      alert('Security PIN updated successfully on ESP32 & Browser!');
+      document.getElementById('cfgCurrentPin').value = '';
+      document.getElementById('cfgNewPin').value = '';
+      document.getElementById('cfgConfirmPin').value = '';
+    }
 
     let TOPIC_TELEMETRY = `drop2crop/${DEVICE_ID}/telemetry`;
     let TOPIC_COMMAND = `drop2crop/${DEVICE_ID}/cmd`;
@@ -668,6 +925,7 @@
       }
 
       const payload = JSON.stringify({
+        auth: STATION_PIN,
         addSched: { h: h, m: m, dur: dur }
       });
       client.publish(TOPIC_COMMAND, payload);
@@ -677,6 +935,7 @@
 
     function toggleScheduleSlot(id, currentState) {
       const payload = JSON.stringify({
+        auth: STATION_PIN,
         toggleSched: id,
         en: !currentState
       });
@@ -687,6 +946,7 @@
     function deleteScheduleSlot(id) {
       if (!confirm(`Delete Schedule Slot #${id + 1}?`)) return;
       const payload = JSON.stringify({
+        auth: STATION_PIN,
         delSched: id
       });
       client.publish(TOPIC_COMMAND, payload);
@@ -1071,7 +1331,7 @@
         alert('⚠️ Cannot execute command: The device is not online!\n\nThe ESP32 controller is currently turned off or disconnected from power. Please plug in the 5V charger and ensure the device is connected to Wi-Fi.');
         return;
       }
-      const payload = JSON.stringify({ pump: state });
+      const payload = JSON.stringify({ auth: STATION_PIN, pump: state });
       client.publish(TOPIC_COMMAND, payload);
       logTerm(`Tx -> Pump: ${state}`);
     }
@@ -1089,7 +1349,7 @@
         alert('⚠️ Cannot execute command: The device is not online!\n\nThe ESP32 controller is currently turned off or disconnected from power. Please plug in the 5V charger and ensure the device is connected to Wi-Fi.');
         return;
       }
-      const payload = JSON.stringify({ mode: modeIndex });
+      const payload = JSON.stringify({ auth: STATION_PIN, mode: modeIndex });
       client.publish(TOPIC_COMMAND, payload);
       logTerm(`Tx -> Set Mode: ${modeIndex}`);
       updateModeButtons(modeIndex);
@@ -1097,14 +1357,21 @@
 
     function overrideRainLock() {
       if (!client || !client.connected) return;
-      const payload = JSON.stringify({ clearRainLock: true });
+      const payload = JSON.stringify({ auth: STATION_PIN, clearRainLock: true });
       client.publish(TOPIC_COMMAND, payload);
       logTerm(`Tx -> Clear Rain Lockout`);
     }
 
     // Initialize on page load
     window.addEventListener('load', () => {
+      checkInitialAuth();
       connectMQTT();
+
+      document.getElementById('pinInput')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          attemptUnlock();
+        }
+      });
     });
   </script>
 </body>

@@ -121,6 +121,17 @@ Drop2Crop features an onboard, clock-driven scheduling engine synchronized to **
 
 ---
 
+## 🔐 Station Security & Access Control
+To protect against unauthorized access and prevent anyone from controlling your irrigation motor:
+- **Web Lockscreen Authentication:** When visiting the dashboard, an authentication lockscreen blocks unauthorized users from viewing controls or triggering actuators.
+- **Hardware-Enforced Command Verification:** The ESP32-S3 firmware verifies an `"auth"` security token on every incoming command packet. If an unauthorized entity sends an MQTT command to your topic, the ESP32 firmware rejects it immediately (`[SECURITY ALERT] Unauthorized command rejected!`).
+- **Default Factory PIN:** **`2564`** *(last 4 digits of device ID `drop2crop_2884858a2564`)*.
+- **Change PIN in Settings:** Open Dashboard Settings (⚙️) to update your PIN. The update is securely saved to the ESP32's onboard Non-Volatile Flash Memory (NVS) and your browser.
+- **One-Click Station Lock:** Click the **🔒 Lock** button in the top navigation bar at any time to lock down the interface.
+- **Brute-Force Protection:** 5 failed attempts trigger a 30-second lockout timer with audio warning chimes.
+
+---
+
 ## 🔌 Real-Time Device Online / Offline Detection
 When you unplug the 5V mobile charger or power is removed from the ESP32:
 - **Instant Cloud Detection:** A dual-layer MQTT Last Will & Testament (LWT) and a 6-second web watchdog continuously monitor the hardware's pulse.
