@@ -36,13 +36,13 @@
 #define PIN_BOOT_BUTTON      0   // Onboard BOOT button (Hold 3s to reset WiFi)
 
 // Relay Channels (Synchronously Driven across all candidate ports)
-// Motor 1: Clean Water Irrigation Pump
-const int PINS_MOTOR1[] = {17, 8, 13, 9, 21};
-const int NUM_PINS_M1   = 5;
+// Motor 1: Clean Water Irrigation Pump (Includes GPIO 2, GPIO 17, GPIO 8, GPIO 13, GPIO 9, GPIO 21)
+const int PINS_MOTOR1[] = {2, 17, 8, 13, 9, 21};
+const int NUM_PINS_M1   = 6;
 
-// Motor 2: Fertigation Nutrient Pump
-const int PINS_MOTOR2[] = {18, 7, 14, 10, 47};
-const int NUM_PINS_M2   = 5;
+// Motor 2: Fertigation Nutrient Pump (Includes GPIO 1, GPIO 18, GPIO 7, GPIO 14, GPIO 10, GPIO 47)
+const int PINS_MOTOR2[] = {1, 18, 7, 14, 10, 47};
+const int NUM_PINS_M2   = 6;
 
 // ==================== CALIBRATION & THRESHOLDS ====================
 const int SOIL_DRY_RAW         = 3150;
@@ -179,7 +179,7 @@ void configureAllPins() {
   pinMode(PIN_BOOT_BUTTON, INPUT_PULLUP);
 
   Serial.println("[HARDWARE] All relay pins initialized to OFF with maximum current drive capability.");
-  Serial.println("[HARDWARE] Motor 1 Pins: 17, 8, 13, 9, 21 | Motor 2 Pins: 18, 7, 14, 10, 47");
+  Serial.println("[HARDWARE] Motor 1 Pins: 2, 17, 8, 13, 9, 21 | Motor 2 Pins: 1, 18, 7, 14, 10, 47");
 }
 
 // ==================== NVS FLASH STORAGE ====================
@@ -313,7 +313,7 @@ void setWaterPump(bool state, const char* reason) {
     digitalWrite(PINS_MOTOR1[i], drivePinLevel);
   }
 
-  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pins 17, 8, 13, 9, 21 = %s, Trigger: %s)\n", 
+  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pins 2, 17, 8, 13, 9, 21 = %s, Trigger: %s)\n", 
                 pumpWaterActive ? "ON" : "OFF", 
                 drivePinLevel == LOW ? "LOW (0V)" : "HIGH (3.3V)", reason);
 }
@@ -349,9 +349,9 @@ void setFertPump(bool state, const char* reason) {
     digitalWrite(PINS_MOTOR2[i], drivePinLevel);
   }
 
-  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pins 18, 7, 14, 10, 47 = %s, Trigger: %s)\n", 
+  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pins 1, 18, 7, 14, 10, 47 = %s, Trigger: %s)\n", 
                 pumpFertActive ? "ON" : "OFF", 
-                drivePinLevel == LOW ? "LOW (0V)" : "HIGH (3.3V)", reason);
+                drivePinLevel == LOW ? "LOW" : "HIGH", reason);
 }
 
 // ==================== SENSOR READING ====================
