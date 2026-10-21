@@ -534,6 +534,53 @@
         <span id="safetyNoticeText">Safety interlock active. Pump cannot be started.</span>
       </div>
 
+      <!-- Relay Diagnostics & Polarity Panel -->
+      <div class="p-4 rounded-2xl bg-slate-900/70 border border-slate-700/80 space-y-3">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center text-sm font-bold">
+              ⚡
+            </div>
+            <div>
+              <div class="text-sm font-bold font-display text-white">Relay Hardware Diagnostic &amp; Trigger Mode</div>
+              <p class="text-[11px] text-slate-400">Test physical coil clicks &amp; adjust trigger voltage polarity</p>
+            </div>
+          </div>
+          <button onclick="triggerRelayClickTest()" class="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 font-display font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md">
+            <span>🔊</span>
+            <span>Pulse Click Test (3x)</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-800 text-xs">
+          <!-- Polarity Selection -->
+          <div class="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-slate-300">Trigger Polarity:</span>
+              <span id="polarityStatusPill" class="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">Active LOW</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <button id="polarityLowBtn" onclick="setRelayPolarity(true)" class="py-1.5 px-2 rounded-lg font-mono text-[11px] font-semibold border transition text-center bg-emerald-500/20 border-emerald-500/60 text-emerald-300 shadow-sm">
+                Active LOW (0V)
+              </button>
+              <button id="polarityHighBtn" onclick="setRelayPolarity(false)" class="py-1.5 px-2 rounded-lg font-mono text-[11px] font-semibold border transition text-center bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200">
+                Active HIGH (3.3V)
+              </button>
+            </div>
+            <p class="text-[10px] text-slate-400">Standard 5V relay boards trigger when pin pulls to GND (0V).</p>
+          </div>
+
+          <!-- Hardware Diagnostic Tip -->
+          <div class="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80 text-[11px] text-slate-400 space-y-1">
+            <div class="font-bold text-amber-300 flex items-center gap-1">
+              <span>💡</span> If LED glows but NO physical click:
+            </div>
+            <div>• <strong>Coil Voltage:</strong> Relay <code class="text-sky-300 font-mono">VCC</code> must connect to <strong class="text-emerald-400">5Vin</strong> (NOT 3.3V).</div>
+            <div>• <strong>Jumper:</strong> Ensure blue <code class="text-sky-300 font-mono">JD-VCC</code> jumper cap is attached.</div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <!-- Live Telemetry Stream Terminal (Collapsible) -->
@@ -1381,6 +1428,9 @@
         currentSafetyBypass = data.safeBypass;
         updateSafetyUI(currentSafetyBypass);
       }
+      if (data.relLow !== undefined) {
+        updateRelayPolarityUI(data.relLow);
+      }
 
       // 6. Dual-Motor Actuator States
       currentPumpState = data.pump ?? false;
@@ -1732,6 +1782,57 @@
         if (cfgBadge) {
           cfgBadge.innerText = 'ENFORCED';
           cfgBadge.className = 'text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
+        }
+      }
+    }
+
+    function triggerRelayClickTest() {
+      if (!client || !client.connected) {
+        alert('Cannot send command: Cloud broker is disconnected!');
+        return;
+      }
+      if (!isDeviceOnline) {
+        alert('⚠️ Cannot execute test: The device is not online!\n\nPlease ensure your ESP32 is plugged in and connected to Wi-Fi.');
+        return;
+      }
+      const payload = JSON.stringify({ auth: STATION_PIN, clickTest: true });
+      client.publish(TOPIC_COMMAND, payload);
+      logTerm('Tx -> Triggered Relay Coil Click Diagnostic Test (3x Pulse)');
+      alert('⚡ Click Diagnostic Sent!\n\nThe ESP32 is pulsing Relay 1 and Relay 2 three times in rapid succession (400ms on/off).\n\nListen closely for the mechanical *CLICK* sound on the relay board.');
+    }
+
+    function setRelayPolarity(isLow) {
+      if (!client || !client.connected) {
+        alert('Cannot send command: Cloud broker is disconnected!');
+        return;
+      }
+      if (!isDeviceOnline) {
+        alert('⚠️ Cannot execute command: The device is not online!');
+        return;
+      }
+      const payload = JSON.stringify({ auth: STATION_PIN, setRelayActiveLow: isLow });
+      client.publish(TOPIC_COMMAND, payload);
+      updateRelayPolarityUI(isLow);
+      logTerm(`Tx -> Relay Polarity Set: ${isLow ? 'Active LOW (0V)' : 'Active HIGH (3.3V)'}`);
+    }
+
+    function updateRelayPolarityUI(isLow) {
+      const pill = document.getElementById('polarityStatusPill');
+      const lowBtn = document.getElementById('polarityLowBtn');
+      const highBtn = document.getElementById('polarityHighBtn');
+      if (pill) {
+        pill.innerText = isLow ? 'Active LOW (0V)' : 'Active HIGH (3.3V)';
+        pill.className = isLow 
+          ? 'text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+          : 'text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+      }
+      if (lowBtn && highBtn) {
+        if (isLow) {
+          lowBtn.className = 'py-1.5 px-2 rounded-lg font-mono text-[11px] font-semibold border transition text-center bg-emerald-500/20 border-emerald-500/60 text-emerald-300 shadow-sm';
+          highBtn.className = 'py-1.5 px-2 rounded-lg font-mono text-[11px] font-semibold border transition text-center bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200';
+        } else {
+          lowBtn.className = 'py-1.5 px-2 rounded-lg font-mono text-[11px] font-semibold border transition text-center bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200';
+          highBtn.className = 'py-1.5 px-2 rounded-lg font-mono text-[11px] font-semibold border transition text-center bg-amber-500/20 border-amber-500/60 text-amber-300 shadow-sm';
         }
       }
     }

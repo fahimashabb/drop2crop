@@ -116,6 +116,7 @@ int waterTankPercent = 0;
 bool pumpWaterActive = false; // Motor 1: Clean Water Irrigation Pump (Relay 1, GPIO 9)
 bool pumpFertActive  = false; // Motor 2: Fertigation Nutrient Pump (Relay 2, GPIO 10)
 bool safetyOverride  = false; // Safety Bypass: true = allow forcing motors ON/OFF regardless of water/rain
+bool relayActiveLow  = true;  // Relay Trigger: true = Active LOW (0V triggers), false = Active HIGH (3.3V triggers)
 
 // NTP Time variables (UTC+6 Bangladesh Standard Time)
 const long  GMT_OFFSET_SEC = 21600;
@@ -140,10 +141,12 @@ void loadCredentials() {
   wifiPass = preferences.getString("pass", "itsanewform");
   devicePasscode = preferences.getString("pin", "2564");
   safetyOverride = preferences.getBool("safeBypass", false);
+  relayActiveLow = preferences.getBool("relLow", true);
   preferences.end();
   Serial.printf("[NVS] Loaded WiFi Config: SSID='%s'\n", wifiSSID.c_str());
   Serial.printf("[NVS] Station Security PIN configured: '%s'\n", devicePasscode.c_str());
   Serial.printf("[NVS] Safety Mechanism: %s\n", safetyOverride ? "BYPASSED (Force Override Active)" : "ENFORCED (Safeties Active)");
+  Serial.printf("[NVS] Relay Trigger Polarity: Active %s\n", relayActiveLow ? "LOW (0V = ON)" : "HIGH (3.3V = ON)");
 
   preferences.begin("d2c_sched", false);
   numSchedules = preferences.getInt("count", 0);
@@ -198,6 +201,14 @@ void saveSafetyOverride(bool bypass) {
   preferences.end();
   Serial.printf("[SAFETY] Safety Override updated in Flash NVS: %s\n", 
                 safetyOverride ? "BYPASSED (Force Override Active)" : "ENFORCED (Safeties Active)");
+}
+
+void saveRelayTriggerMode(bool isLow) {
+  relayActiveLow = isLow;
+  preferences.begin("d2c_cfg", false);
+  preferences.putBool("relLow", relayActiveLow);
+  preferences.end();
+  Serial.printf("[RELAY] Trigger Polarity updated in Flash NVS: Active %s\n", relayActiveLow ? "LOW" : "HIGH");
 }
 
 void saveSchedulesToNVS() {
@@ -313,45 +324,55 @@ void startCaptivePortal() {
 
 // ==================== ACTUATOR CONTROL (DUAL MOTOR) ====================
 void setWaterPump(bool state, const char* reason = "Manual") {
+  int offLevel = relayActiveLow ? HIGH : LOW;
+  int onLevel  = relayActiveLow ? LOW : HIGH;
+
   if (state && !safetyOverride && waterTankPercent < TANK_EMPTY_CUTOFF) {
     Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: Tank < 15%% empty! (Safety Active)\n", reason);
     pumpWaterActive = false;
-    digitalWrite(PIN_RELAY_PUMP, HIGH);
+    digitalWrite(PIN_RELAY_PUMP, offLevel);
     return;
   }
 
   if (state && !safetyOverride && rainLocked && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
     Serial.printf("[SAFETY BLOCK] Water Pump (%s) blocked: 24h Rain Lockout! (Safety Active)\n", reason);
     pumpWaterActive = false;
-    digitalWrite(PIN_RELAY_PUMP, HIGH);
+    digitalWrite(PIN_RELAY_PUMP, offLevel);
     return;
   }
 
   pumpWaterActive = state;
-  digitalWrite(PIN_RELAY_PUMP, pumpWaterActive ? LOW : HIGH);
-  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Trigger: %s%s)\n", 
-                pumpWaterActive ? "ON" : "OFF", reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
+  int drivePinLevel = pumpWaterActive ? onLevel : offLevel;
+  digitalWrite(PIN_RELAY_PUMP, drivePinLevel);
+  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pin %d = %s, Trigger: %s%s)\n", 
+                pumpWaterActive ? "ON" : "OFF", PIN_RELAY_PUMP, drivePinLevel == LOW ? "LOW" : "HIGH",
+                reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
 }
 
 void setFertPump(bool state, const char* reason = "Manual") {
+  int offLevel = relayActiveLow ? HIGH : LOW;
+  int onLevel  = relayActiveLow ? LOW : HIGH;
+
   if (state && !safetyOverride && waterTankPercent < TANK_EMPTY_CUTOFF) {
     Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: Tank < 15%% empty! (Safety Active)\n", reason);
     pumpFertActive = false;
-    digitalWrite(PIN_RELAY_VALVE, HIGH);
+    digitalWrite(PIN_RELAY_VALVE, offLevel);
     return;
   }
 
   if (state && !safetyOverride && rainLocked && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
     Serial.printf("[SAFETY BLOCK] Fertigation Pump (%s) blocked: 24h Rain Lockout! (Safety Active)\n", reason);
     pumpFertActive = false;
-    digitalWrite(PIN_RELAY_VALVE, HIGH);
+    digitalWrite(PIN_RELAY_VALVE, offLevel);
     return;
   }
 
   pumpFertActive = state;
-  digitalWrite(PIN_RELAY_VALVE, pumpFertActive ? LOW : HIGH);
-  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Trigger: %s%s)\n", 
-                pumpFertActive ? "ON" : "OFF", reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
+  int drivePinLevel = pumpFertActive ? onLevel : offLevel;
+  digitalWrite(PIN_RELAY_VALVE, drivePinLevel);
+  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pin %d = %s, Trigger: %s%s)\n", 
+                pumpFertActive ? "ON" : "OFF", PIN_RELAY_VALVE, drivePinLevel == LOW ? "LOW" : "HIGH",
+                reason, safetyOverride ? " [SAFETY BYPASS ACTIVE]" : "");
 }
 
 void setPump(bool state, const char* reason = "Manual") {
@@ -563,6 +584,7 @@ void publishTelemetry() {
   doc["schedTgt"] = scheduleTarget;
   doc["nextRun"]  = nextRunString;
   doc["safeBypass"] = safetyOverride; // Safety Bypass: true = force mode active, false = safeties enforced
+  doc["relLow"]     = relayActiveLow;  // Relay Trigger: true = Active LOW, false = Active HIGH
 
   JsonArray arr = doc.createNestedArray("schedules");
   for (int i = 0; i < numSchedules; i++) {
@@ -605,6 +627,37 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     else if (doc.containsKey("safetyOverride")) bypassVal = doc["safetyOverride"];
     saveSafetyOverride(bypassVal);
     publishTelemetry();
+  }
+
+  // Handle Relay Trigger Polarity (Active LOW vs Active HIGH)
+  if (doc.containsKey("setRelayActiveLow") || doc.containsKey("relLow")) {
+    bool isLow = true;
+    if (doc.containsKey("setRelayActiveLow")) isLow = doc["setRelayActiveLow"];
+    else if (doc.containsKey("relLow")) isLow = doc["relLow"];
+    saveRelayTriggerMode(isLow);
+    setWaterPump(pumpWaterActive, "Trigger Polarity Update");
+    setFertPump(pumpFertActive, "Trigger Polarity Update");
+    publishTelemetry();
+  }
+
+  // Mechanical Click Diagnostic Test: Pulses Relay 1 & Relay 2 to test coils
+  if (doc.containsKey("clickTest")) {
+    Serial.println("[TEST] Starting Relay Mechanical Click Diagnostic...");
+    for (int i = 0; i < 3; i++) {
+      digitalWrite(PIN_RELAY_PUMP, relayActiveLow ? LOW : HIGH);
+      delay(400);
+      digitalWrite(PIN_RELAY_PUMP, relayActiveLow ? HIGH : LOW);
+      delay(400);
+    }
+    for (int i = 0; i < 3; i++) {
+      digitalWrite(PIN_RELAY_VALVE, relayActiveLow ? LOW : HIGH);
+      delay(400);
+      digitalWrite(PIN_RELAY_VALVE, relayActiveLow ? HIGH : LOW);
+      delay(400);
+    }
+    setWaterPump(pumpWaterActive, "Test Completed");
+    setFertPump(pumpFertActive, "Test Completed");
+    Serial.println("[TEST] Relay Click Test Completed.");
   }
 
   if (doc.containsKey("force")) {
@@ -769,6 +822,9 @@ void setup() {
   Serial.printf("Telemetry Topic:  %s\n", topicTelemetry);
   Serial.printf("Command Topic:    %s\n", topicCommand);
 
+  // Load Saved WiFi & Schedules & Config from Flash Memory
+  loadCredentials();
+
   // Initialize Pins
   pinMode(PIN_SOIL_ANALOG, INPUT);
   pinMode(PIN_RAIN_DIGITAL, INPUT_PULLUP);
@@ -782,9 +838,6 @@ void setup() {
 
   setWaterPump(false, "System Boot");
   setFertPump(false, "System Boot");
-
-  // Load Saved WiFi & Schedules from Flash Memory
-  loadCredentials();
 
   // Attempt to connect to saved WiFi (timeout 12s)
   Serial.printf("[WiFi] Connecting to saved network: %s ...\n", wifiSSID.c_str());
