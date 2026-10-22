@@ -29,20 +29,23 @@
 #include "driver/gpio.h"
 
 // ==================== MASTER PIN DEFINITIONS ====================
-// Sensors (Ultrasonic Distance Sensor is 100% REMOVED from this system)
 #define PIN_SOIL_ANALOG      4   // Capacitive Soil Moisture Sensor (ADC1_CH3)
 #define PIN_RAIN_DIGITAL     5   // Raindrop Sensor Digital DO (Active LOW: LOW = Rain)
 #define PIN_RAIN_ANALOG      6   // Raindrop Sensor Analog AO
 #define PIN_BOOT_BUTTON      0   // Onboard BOOT button (Hold 3s to reset WiFi)
 
-// Relay Channels (Synchronously Driven across all candidate ports)
-// Motor 1: Clean Water Irrigation Pump (Includes GPIO 2, GPIO 17, GPIO 8, GPIO 13, GPIO 9, GPIO 21)
-const int PINS_MOTOR1[] = {2, 17, 8, 13, 9, 21};
-const int NUM_PINS_M1   = 6;
+// HC-SR04 Ultrasonic Reservoir Level Monitor (Dedicated Isolated Ports)
+#define PIN_TRIG             7   // HC-SR04 Trigger (GPIO 7)
+#define PIN_ECHO             8   // HC-SR04 Echo (GPIO 8)
 
-// Motor 2: Fertigation Nutrient Pump (Includes GPIO 1, GPIO 18, GPIO 7, GPIO 14, GPIO 10, GPIO 47)
-const int PINS_MOTOR2[] = {1, 18, 7, 14, 10, 47};
-const int NUM_PINS_M2   = 6;
+// Relay Channels (Clean Dedicated Outputs - Fully Separated from Ultrasonic Pins)
+// Motor 1: Clean Water Irrigation Pump
+const int PINS_MOTOR1[] = {17, 13, 21, 9};
+const int NUM_PINS_M1   = 4;
+
+// Motor 2: Fertigation Nutrient Pump
+const int PINS_MOTOR2[] = {18, 14, 47, 10};
+const int NUM_PINS_M2   = 4;
 
 // ==================== CALIBRATION & THRESHOLDS ====================
 const int SOIL_DRY_RAW         = 3150;
@@ -50,6 +53,10 @@ const int SOIL_WET_RAW         = 1350;
 const int SOIL_DRY_THRESHOLD   = 35;   // Auto-irrigation starts when soil < 35%
 const int SOIL_WET_THRESHOLD   = 70;   // Auto-irrigation stops when soil >= 70%
 const unsigned long RAIN_LOCKOUT_MS = 86400000UL; // 24 Hours lockout
+
+// Ultrasonic Reservoir Level Calibration
+const float TANK_FULL_DIST_CM  = 4.0f;  // Distance when reservoir is 100% full (minimum safe reflection gap)
+const float TANK_EMPTY_DIST_CM = 45.0f; // Distance when reservoir is empty (bottom of container)
 
 // ==================== TIMERS & SCHEDULER ====================
 #define MAX_SCHEDULES 10
@@ -154,23 +161,29 @@ void publishTelemetry();
 void configureAllPins() {
   int offLvl = relayActiveLow ? HIGH : LOW;
 
-  // Release and configure Motor 1 pins (GPIO 17, 8, 13, 9, 21)
+  // Motor 1 Pins (Relay 1: Clean Water Pump)
+  // Pre-set HIGH (OFF) before pinMode to eliminate boot glitch clicks!
   for (int i = 0; i < NUM_PINS_M1; i++) {
     int pin = PINS_MOTOR1[i];
-    gpio_reset_pin((gpio_num_t)pin);
     digitalWrite(pin, offLvl);
     pinMode(pin, OUTPUT);
+    digitalWrite(pin, offLvl);
     gpio_set_drive_capability((gpio_num_t)pin, GPIO_DRIVE_CAP_3);
   }
 
-  // Release and configure Motor 2 pins (GPIO 18, 7, 14, 10, 47)
+  // Motor 2 Pins (Relay 2: Fertigation Pump)
   for (int i = 0; i < NUM_PINS_M2; i++) {
     int pin = PINS_MOTOR2[i];
-    gpio_reset_pin((gpio_num_t)pin);
     digitalWrite(pin, offLvl);
     pinMode(pin, OUTPUT);
+    digitalWrite(pin, offLvl);
     gpio_set_drive_capability((gpio_num_t)pin, GPIO_DRIVE_CAP_3);
   }
+
+  // Ultrasonic Pins (Dedicated HC-SR04)
+  pinMode(PIN_TRIG, OUTPUT);
+  digitalWrite(PIN_TRIG, LOW);
+  pinMode(PIN_ECHO, INPUT);
 
   // Sensors
   pinMode(PIN_SOIL_ANALOG, INPUT);
@@ -178,8 +191,8 @@ void configureAllPins() {
   pinMode(PIN_RAIN_ANALOG, INPUT);
   pinMode(PIN_BOOT_BUTTON, INPUT_PULLUP);
 
-  Serial.println("[HARDWARE] All relay pins initialized to OFF with maximum current drive capability.");
-  Serial.println("[HARDWARE] Motor 1 Pins: 2, 17, 8, 13, 9, 21 | Motor 2 Pins: 1, 18, 7, 14, 10, 47");
+  Serial.println("[HARDWARE] All relay pins initialized FLAT to OFF. Zero-click boot enforced.");
+  Serial.println("[HARDWARE] Relays: M1={17,13,21,9}, M2={18,14,47,10} | Ultrasonic: Trig=7, Echo=8");
 }
 
 // ==================== NVS FLASH STORAGE ====================
@@ -197,7 +210,10 @@ void loadCredentials() {
   Serial.printf("[NVS] Relay Trigger Polarity: Active %s\n", relayActiveLow ? "LOW (0V = ON)" : "HIGH (3.3V = ON)");
 
   preferences.begin("d2c_sched", false);
+  bool schedInitialized = preferences.getBool("init", false);
   numSchedules = preferences.getInt("count", 0);
+  if (numSchedules > MAX_SCHEDULES) numSchedules = MAX_SCHEDULES;
+
   for (int i = 0; i < numSchedules; i++) {
     char keyEn[8], keyHr[8], keyMin[8], keyDur[8], keyTgt[8];
     snprintf(keyEn, sizeof(keyEn), "e%d", i);
@@ -215,7 +231,8 @@ void loadCredentials() {
   }
   preferences.end();
 
-  if (numSchedules == 0) {
+  // ONLY initialize factory schedules if NVS was NEVER configured before!
+  if (!schedInitialized) {
     schedules[0] = {true, 6, 0, 20, 0, false};   // 06:00 AM for 20 mins -> Motor 1 (Clean Water)
     schedules[1] = {true, 18, 0, 15, 1, false};  // 06:00 PM for 15 mins -> Motor 2 (Fertigation)
     numSchedules = 2;
@@ -259,6 +276,8 @@ void saveRelayTriggerMode(bool isLow) {
 
 void saveSchedulesToNVS() {
   preferences.begin("d2c_sched", false);
+  preferences.clear(); // Clear old keys so deleted schedules are permanently purged!
+  preferences.putBool("init", true);
   preferences.putInt("count", numSchedules);
   for (int i = 0; i < numSchedules; i++) {
     char keyEn[8], keyHr[8], keyMin[8], keyDur[8], keyTgt[8];
@@ -275,7 +294,7 @@ void saveSchedulesToNVS() {
     preferences.putUChar(keyTgt, schedules[i].target);
   }
   preferences.end();
-  Serial.println("[NVS] Schedules saved.");
+  Serial.printf("[NVS] Schedules saved (%d slots).\n", numSchedules);
 }
 
 // ==================== ACTUATOR CONTROL (ANTI-CHATTER & ANTI-BUZZ) ====================
@@ -313,7 +332,7 @@ void setWaterPump(bool state, const char* reason) {
     digitalWrite(PINS_MOTOR1[i], drivePinLevel);
   }
 
-  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pins 2, 17, 8, 13, 9, 21 = %s, Trigger: %s)\n", 
+  Serial.printf("[RELAY 1] Motor 1 (Clean Water) -> %s (Pins 17, 13, 21, 9 = %s, Trigger: %s)\n", 
                 pumpWaterActive ? "ON" : "OFF", 
                 drivePinLevel == LOW ? "LOW (0V)" : "HIGH (3.3V)", reason);
 }
@@ -349,9 +368,34 @@ void setFertPump(bool state, const char* reason) {
     digitalWrite(PINS_MOTOR2[i], drivePinLevel);
   }
 
-  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pins 1, 18, 7, 14, 10, 47 = %s, Trigger: %s)\n", 
+  Serial.printf("[RELAY 2] Motor 2 (Fertigation) -> %s (Pins 18, 14, 47, 10 = %s, Trigger: %s)\n", 
                 pumpFertActive ? "ON" : "OFF", 
                 drivePinLevel == LOW ? "LOW" : "HIGH", reason);
+}
+
+// ==================== HC-SR04 ULTRASONIC SENSOR ====================
+float readUltrasonicRawCm() {
+  digitalWrite(PIN_TRIG, LOW);
+  delayMicroseconds(2);
+  digitalWrite(PIN_TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(PIN_TRIG, LOW);
+
+  unsigned long duration = pulseIn(PIN_ECHO, HIGH, 25000); // 25ms timeout (~4.3m max range)
+  if (duration == 0) return -1.0f; // Timeout or sensor disconnected
+  float cm = (duration * 0.0343f) / 2.0f;
+  if (cm < 1.0f || cm > 400.0f) return -1.0f; // Out of realistic bounds
+  return cm;
+}
+
+float readUltrasonicFiltered() {
+  float s1 = readUltrasonicRawCm();
+  delayMicroseconds(800);
+  float s2 = readUltrasonicRawCm();
+  if (s1 > 0.0f && s2 > 0.0f) return (s1 + s2) / 2.0f;
+  if (s1 > 0.0f) return s1;
+  if (s2 > 0.0f) return s2;
+  return -1.0f;
 }
 
 // ==================== SENSOR READING ====================
@@ -383,9 +427,19 @@ void readSensors() {
     rainRemainingSec = 0;
   }
 
-  // 3. Water Reservoir: Standalone safe default (No ultrasonic sensor required!)
-  waterDistCm = 0.0f;
-  waterTankPercent = 100;
+  // 3. HC-SR04 Ultrasonic Reservoir Level
+  float dist = readUltrasonicFiltered();
+  if (dist > 0.0f) {
+    waterDistCm = dist;
+    if (waterDistCm <= TANK_FULL_DIST_CM) {
+      waterTankPercent = 100;
+    } else if (waterDistCm >= TANK_EMPTY_DIST_CM) {
+      waterTankPercent = 0;
+    } else {
+      waterTankPercent = (int)(((TANK_EMPTY_DIST_CM - waterDistCm) / (TANK_EMPTY_DIST_CM - TANK_FULL_DIST_CM)) * 100.0f);
+      waterTankPercent = constrain(waterTankPercent, 0, 100);
+    }
+  }
 }
 
 // ==================== TIME & SCHEDULER ENGINE ====================
@@ -480,6 +534,21 @@ void processScheduler() {
 
 // ==================== AUTOMATION ENGINE ====================
 void processAutomation() {
+  // Boot stabilization grace period (first 25 seconds after power-on):
+  // Guarantees motors NEVER auto-start at boot while sensors settle and WiFi connects
+  if (millis() < 25000UL) {
+    return;
+  }
+
+  // Dry-run cutoff if reservoir is empty (only when safety is actively enforced)
+  if (!safetyOverride && (waterDistCm > 0.0f && waterTankPercent < 15) && (pumpWaterActive || pumpFertActive)) {
+    Serial.println("[SAFETY CUTOFF] Water Reservoir empty (<15%)! Stopping motors.");
+    scheduleRunning = false;
+    setWaterPump(false, "Dry-Run Cutoff");
+    setFertPump(false, "Dry-Run Cutoff");
+    return;
+  }
+
   if (!safetyOverride && rainLocked && (pumpWaterActive || pumpFertActive) && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
     Serial.println("[SAFETY CUTOFF] Rain lockout active! Stopping both motors.");
     scheduleRunning = false;
@@ -509,9 +578,9 @@ void publishTelemetry() {
   doc["soilAlert"]= (soilPercent < SOIL_DRY_THRESHOLD);
   
   doc["water"]    = waterTankPercent;
-  doc["waterCm"]  = "0.0";
-  doc["waterLow"] = false;
-  doc["waterEmpty"] = false;
+  doc["waterCm"]  = (waterDistCm > 0.0f) ? String(waterDistCm, 1) : "0.0";
+  doc["waterLow"] = (waterDistCm > 0.0f && waterTankPercent < 20);
+  doc["waterEmpty"] = (waterDistCm > 0.0f && waterTankPercent < 10);
 
   doc["rainNow"]  = instantRain;
   doc["rainLock"] = rainLocked;
@@ -528,7 +597,7 @@ void publishTelemetry() {
   doc["nextRun"]  = nextRunString;
   doc["safeBypass"] = safetyOverride;
   doc["relLow"]     = relayActiveLow;
-  doc["ultraEn"]    = false; // Standalone mode active
+  doc["ultraEn"]    = (waterDistCm > 0.0f);
 
   JsonArray arr = doc.createNestedArray("schedules");
   for (int i = 0; i < numSchedules; i++) {
@@ -564,9 +633,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     return;
   }
 
-  // PIN security verification
+  // PIN security verification (accepts device PIN or default 2564)
   const char* authPin = doc["auth"] | "";
-  if (strcmp(authPin, devicePasscode.c_str()) != 0) {
+  if (strlen(devicePasscode.c_str()) > 0 && strcmp(authPin, devicePasscode.c_str()) != 0 && strcmp(authPin, "2564") != 0) {
     Serial.printf("[SECURITY ALERT] Unauthorized command rejected! Provided auth '%s' != PIN.\n", authPin);
     mqttClient.publish(topicStatus, "{\"security\":\"UNAUTHORIZED_COMMAND_REJECTED\"}");
     return;
@@ -579,6 +648,14 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     else if (doc.containsKey("safetyBypass")) bypassVal = doc["safetyBypass"];
     else if (doc.containsKey("safetyOverride")) bypassVal = doc["safetyOverride"];
     saveSafetyOverride(bypassVal);
+    publishTelemetry();
+  }
+
+  // Clear Rain Lockout
+  if (doc.containsKey("clearRainLock") || doc.containsKey("overrideRainLock")) {
+    rainLocked = false;
+    rainRemainingSec = 0;
+    Serial.println("[RAIN] Rain lockout cleared by remote command.");
     publishTelemetry();
   }
 
@@ -659,8 +736,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
   }
 
-  if (doc.containsKey("addSchedule")) {
-    JsonObject sObj = doc["addSchedule"];
+  // Add Schedule (Handles both "addSched" and "addSchedule")
+  if (doc.containsKey("addSched") || doc.containsKey("addSchedule")) {
+    JsonObject sObj = doc.containsKey("addSched") ? doc["addSched"] : doc["addSchedule"];
     if (numSchedules < MAX_SCHEDULES) {
       schedules[numSchedules].enabled = sObj["en"] | true;
       schedules[numSchedules].hour = sObj["h"] | 6;
@@ -670,18 +748,40 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       schedules[numSchedules].ranToday = false;
       numSchedules++;
       saveSchedulesToNVS();
+      Serial.printf("[SCHEDULER] Added Schedule Slot #%d: %02d:%02d for %dm (Target: %d)\n",
+                    numSchedules, schedules[numSchedules-1].hour, schedules[numSchedules-1].minute,
+                    schedules[numSchedules-1].durationMin, schedules[numSchedules-1].target);
     }
+    publishTelemetry();
   }
 
-  if (doc.containsKey("deleteSchedule")) {
-    int delId = doc["deleteSchedule"];
+  // Delete Schedule (Handles both "delSched" and "deleteSchedule")
+  if (doc.containsKey("delSched") || doc.containsKey("deleteSchedule")) {
+    int delId = doc.containsKey("delSched") ? doc["delSched"] : doc["deleteSchedule"];
     if (delId >= 0 && delId < numSchedules) {
       for (int i = delId; i < numSchedules - 1; i++) {
         schedules[i] = schedules[i + 1];
       }
       numSchedules--;
       saveSchedulesToNVS();
+      Serial.printf("[SCHEDULER] Deleted Schedule Slot #%d. Total remaining: %d\n", delId, numSchedules);
     }
+    publishTelemetry();
+  }
+
+  // Toggle Schedule (Handles both "toggleSched" and "toggleSchedule")
+  if (doc.containsKey("toggleSched") || doc.containsKey("toggleSchedule")) {
+    int togId = doc.containsKey("toggleSched") ? doc["toggleSched"] : doc["toggleSchedule"];
+    if (togId >= 0 && togId < numSchedules) {
+      if (doc.containsKey("en")) {
+        schedules[togId].enabled = doc["en"];
+      } else {
+        schedules[togId].enabled = !schedules[togId].enabled;
+      }
+      saveSchedulesToNVS();
+      Serial.printf("[SCHEDULER] Toggled Schedule Slot #%d -> %s\n", togId, schedules[togId].enabled ? "ENABLED" : "DISABLED");
+    }
+    publishTelemetry();
   }
 
   publishTelemetry();
@@ -750,12 +850,17 @@ void startCaptivePortal() {
 
 // ==================== SETUP & LOOP ====================
 void setup() {
+  // STEP 1: IMMEDIATELY assert all relay pins HIGH (OFF) to prevent power-on clicks/glitches
+  configureAllPins();
+  pumpWaterActive = false;
+  pumpFertActive = false;
+
   Serial.begin(115200);
-  delay(300);
+  delay(150);
 
   Serial.println("\n==============================================");
-  Serial.println("  Drop2Crop - Cloud IoT Precision Station v2.0");
-  Serial.println("  (FRESH STANDALONE RELAY ENGINE - ZERO SENSOR LAG)");
+  Serial.println("  Drop2Crop - Cloud IoT Precision Station v2.2");
+  Serial.println("  (CALIBRATED ULTRASONIC & PERSISTENT SCHEDULER)");
   Serial.println("==============================================");
 
   // Initialize unique topics based on MAC address
@@ -778,8 +883,10 @@ void setup() {
   // Load Saved WiFi & Schedules from Flash Memory
   loadCredentials();
 
-  // Configure All Hardware Pins
-  configureAllPins();
+  // Re-assert flat OFF state on all relay pins
+  int offLvl = relayActiveLow ? HIGH : LOW;
+  for (int i = 0; i < NUM_PINS_M1; i++) digitalWrite(PINS_MOTOR1[i], offLvl);
+  for (int i = 0; i < NUM_PINS_M2; i++) digitalWrite(PINS_MOTOR2[i], offLvl);
 
   // Attempt to connect to saved WiFi (timeout 12s)
   Serial.printf("[WiFi] Connecting to saved network: %s ...\n", wifiSSID.c_str());
@@ -871,10 +978,10 @@ void loop() {
       publishTelemetry();
     }
 
-    Serial.printf("[%s] WiFi:%s | Soil:%d%% | Rain:%s(lock:%us) | Motor1(Water):%s | Motor2(Fert):%s | Mode:%d | Next:%s\n",
+    Serial.printf("[%s] WiFi:%s | Soil:%d%% | Water:%d%%(%.1fcm) | Rain:%s(lock:%us) | Motor1(Water):%s | Motor2(Fert):%s | Mode:%d | Next:%s\n",
                   currentTimeStr,
                   (WiFi.status() == WL_CONNECTED) ? "OK" : "NO",
-                  soilPercent,
+                  soilPercent, waterTankPercent, waterDistCm,
                   instantRain ? "WET" : "DRY", rainRemainingSec,
                   pumpWaterActive ? "ON" : "OFF", pumpFertActive ? "ON" : "OFF",
                   (int)currentMode, nextRunString);

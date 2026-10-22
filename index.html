@@ -1212,13 +1212,28 @@
         return;
       }
 
+      const schedPayload = { h: h, m: m, dur: dur, tgt: target };
       const payload = JSON.stringify({
         auth: STATION_PIN,
-        addSched: { h: h, m: m, dur: dur, tgt: target }
+        addSched: schedPayload,
+        addSchedule: schedPayload
       });
       client.publish(TOPIC_COMMAND, payload);
       const targetLabels = ['Motor 1 (Water)', 'Motor 2 (Fertigation)', 'Both Motors'];
       logTerm(`Tx -> Add Schedule: ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')} for ${dur}m [${targetLabels[target]}]`);
+
+      // Optimistic instant UI update
+      const newSlot = {
+        id: activeSchedules.length,
+        en: true,
+        h: h,
+        m: m,
+        dur: dur,
+        tgt: target
+      };
+      activeSchedules.push(newSlot);
+      renderSchedules(activeSchedules);
+
       closeAddScheduleModal();
     }
 
@@ -1226,20 +1241,34 @@
       const payload = JSON.stringify({
         auth: STATION_PIN,
         toggleSched: id,
+        toggleSchedule: id,
         en: !currentState
       });
       client.publish(TOPIC_COMMAND, payload);
       logTerm(`Tx -> Toggle Schedule #${id} to ${!currentState}`);
+
+      // Optimistic instant UI update
+      const slot = activeSchedules.find(s => s.id === id);
+      if (slot) {
+        slot.en = !currentState;
+        renderSchedules(activeSchedules);
+      }
     }
 
     function deleteScheduleSlot(id) {
       if (!confirm(`Delete Schedule Slot #${id + 1}?`)) return;
       const payload = JSON.stringify({
         auth: STATION_PIN,
-        delSched: id
+        delSched: id,
+        deleteSchedule: id
       });
       client.publish(TOPIC_COMMAND, payload);
       logTerm(`Tx -> Delete Schedule #${id}`);
+
+      // Optimistic instant UI update: filter out slot and re-index
+      activeSchedules = activeSchedules.filter(s => s.id !== id);
+      activeSchedules.forEach((s, idx) => s.id = idx);
+      renderSchedules(activeSchedules);
     }
 
     function toggleTerminal() {
