@@ -127,8 +127,13 @@ int waterTankPercent = 100;
 
 bool pumpWaterActive = false; // Motor 1 State
 bool pumpFertActive  = false; // Motor 2 State
-bool safetyOverride  = true;  // Safety Override (true = force run allowed)
+bool safetyOverride  = false; // Safety Override (false = dry-run & rain protection ENFORCED by default!)
 bool relayActiveLow  = true;  // Relay Trigger: true = Active LOW (0V = ON)
+
+// Persistent Manual Sensor Enable Flags (Saved in NVS Flash across power cycles)
+bool soilSensorEnabled  = true;
+bool waterSensorEnabled = true;
+bool rainSensorEnabled  = true;
 
 // NTP Time (UTC+6 Bangladesh Standard Time)
 const long GMT_OFFSET_SEC = 21600;
@@ -138,7 +143,7 @@ bool       timeSynchronized = false;
 char       currentTimeStr[16] = "--:--:--";
 
 unsigned long lastSensorPoll = 0;
-const unsigned long SENSOR_POLL_INTERVAL = 1500;
+const unsigned long SENSOR_POLL_INTERVAL = 1000;
 
 unsigned long lastCloudReport = 0;
 const unsigned long CLOUD_REPORT_INTERVAL = 2000;
@@ -149,10 +154,13 @@ unsigned long buttonPressStart = 0;
 // Anti-Chatter / Anti-Buzz Hardware Protection Timer
 unsigned long lastWaterPumpSwitch = 0;
 unsigned long lastFertPumpSwitch  = 0;
-const unsigned long RELAY_DEBOUNCE_COOLDOWN_MS = 2000; // Hard minimum 2.0s between switches
+const unsigned long RELAY_DEBOUNCE_COOLDOWN_MS = 2000; // Hard minimum 2.0s between normal switches
+const unsigned long EMERGENCY_OFF_DEBOUNCE_MS  = 250;  // Fast safety shutoff within 250ms
 
 // Forward Declarations
 void saveSchedulesToNVS();
+void saveModeToNVS(OperationMode m);
+void saveSensorConfig(bool soilEn, bool waterEn, bool rainEn);
 void setWaterPump(bool state, const char* reason = "Manual");
 void setFertPump(bool state, const char* reason = "Manual");
 void publishTelemetry();
@@ -198,15 +206,43 @@ void configureAllPins() {
 // ==================== NVS FLASH STORAGE ====================
 void loadCredentials() {
   preferences.begin("d2c_cfg", false);
+  uint8_t cfgVer = preferences.getUChar("cfgVer", 0);
   wifiSSID = preferences.getString("ssid", "Dracarys");
   wifiPass = preferences.getString("pass", "itsanewform");
   devicePasscode = preferences.getString("pin", "2564");
-  safetyOverride = preferences.getBool("safeBypass", true);
   relayActiveLow = preferences.getBool("relLow", true);
+
+  int savedMode = preferences.getInt("opMode", (int)MODE_AUTO_IRRIGATE);
+  if (savedMode >= 0 && savedMode <= 3) {
+    currentMode = (OperationMode)savedMode;
+  }
+
+  soilSensorEnabled  = preferences.getBool("soilEn", true);
+  waterSensorEnabled = preferences.getBool("waterEn", true);
+  rainSensorEnabled  = preferences.getBool("rainEn", true);
+
+  if (cfgVer < 3) {
+    // Migrate from v2.x: enforce safety protection by default so rain/dry-run cutoffs click relays reliably
+    safetyOverride = false;
+    preferences.putBool("safeBypass", false);
+    preferences.putBool("soilEn", soilSensorEnabled);
+    preferences.putBool("waterEn", waterSensorEnabled);
+    preferences.putBool("rainEn", rainSensorEnabled);
+    preferences.putInt("opMode", (int)currentMode);
+    preferences.putUChar("cfgVer", 3);
+    Serial.println("[NVS] Migrated config to v3: Safety Protection ENFORCED & modular sensors persisted.");
+  } else {
+    safetyOverride = preferences.getBool("safeBypass", false);
+  }
   preferences.end();
 
   Serial.printf("[NVS] Loaded WiFi Config: SSID='%s'\n", wifiSSID.c_str());
-  Serial.printf("[NVS] Station PIN: '%s'\n", devicePasscode.c_str());
+  Serial.printf("[NVS] Station PIN: '%s' | Mode: %d | Safety: %s\n",
+                devicePasscode.c_str(), (int)currentMode, safetyOverride ? "BYPASSED" : "ENFORCED");
+  Serial.printf("[NVS] Sensors -> Soil:%s | Water:%s | Rain:%s\n",
+                soilSensorEnabled ? "ON" : "OFF",
+                waterSensorEnabled ? "ON" : "OFF",
+                rainSensorEnabled ? "ON" : "OFF");
   Serial.printf("[NVS] Relay Trigger Polarity: Active %s\n", relayActiveLow ? "LOW (0V = ON)" : "HIGH (3.3V = ON)");
 
   preferences.begin("d2c_sched", false);
@@ -274,6 +310,46 @@ void saveRelayTriggerMode(bool isLow) {
   configureAllPins();
 }
 
+void saveModeToNVS(OperationMode m) {
+  currentMode = m;
+  preferences.begin("d2c_cfg", false);
+  preferences.putInt("opMode", (int)currentMode);
+  preferences.end();
+  Serial.printf("[NVS] Operation Mode saved: %d\n", (int)currentMode);
+}
+
+void saveSensorConfig(bool soilEn, bool waterEn, bool rainEn) {
+  soilSensorEnabled  = soilEn;
+  waterSensorEnabled = waterEn;
+  rainSensorEnabled  = rainEn;
+
+  if (!rainSensorEnabled) {
+    instantRain = false;
+    rainAnalog = 0;
+    rainLocked = false;
+    rainRemainingSec = 0;
+  }
+  if (!soilSensorEnabled) {
+    soilRaw = 0;
+    soilPercent = 0;
+  }
+  if (!waterSensorEnabled) {
+    waterDistCm = -1.0f;
+    waterTankPercent = 100;
+  }
+
+  preferences.begin("d2c_cfg", false);
+  preferences.putBool("soilEn", soilSensorEnabled);
+  preferences.putBool("waterEn", waterSensorEnabled);
+  preferences.putBool("rainEn", rainSensorEnabled);
+  preferences.end();
+
+  Serial.printf("[NVS] Sensor states saved -> Soil:%s | Water:%s | Rain:%s\n",
+                soilSensorEnabled ? "ON" : "OFF",
+                waterSensorEnabled ? "ON" : "OFF",
+                rainSensorEnabled ? "ON" : "OFF");
+}
+
 void saveSchedulesToNVS() {
   preferences.begin("d2c_sched", false);
   preferences.clear(); // Clear old keys so deleted schedules are permanently purged!
@@ -298,29 +374,43 @@ void saveSchedulesToNVS() {
 }
 
 // ==================== ACTUATOR CONTROL (ANTI-CHATTER & ANTI-BUZZ) ====================
+bool isEmergencyCutoffReason(const char* reason) {
+  if (!reason) return false;
+  return (strstr(reason, "Rain") != nullptr || strstr(reason, "Dry-Run") != nullptr || strstr(reason, "Cutoff") != nullptr);
+}
+
 void setWaterPump(bool state, const char* reason) {
   // Guard 1: If motor is already in requested state, do nothing
   if (pumpWaterActive == state) {
     return;
   }
 
-  // Guard 2: Enforce strict anti-chatter cooldown (minimum 2.0s between state changes)
+  // Guard 2: Enforce anti-chatter cooldown (250ms for emergency OFF cutoffs, 2000ms for normal switching)
   unsigned long now = millis();
-  if (now - lastWaterPumpSwitch < RELAY_DEBOUNCE_COOLDOWN_MS && lastWaterPumpSwitch > 0) {
+  unsigned long minCooldown = (!state && isEmergencyCutoffReason(reason)) ? EMERGENCY_OFF_DEBOUNCE_MS : RELAY_DEBOUNCE_COOLDOWN_MS;
+  if (now - lastWaterPumpSwitch < minCooldown && lastWaterPumpSwitch > 0) {
     Serial.printf("[DEBOUNCE] Water Pump transition to %s rejected: cooldown active (%lums remaining)\n",
-                  state ? "ON" : "OFF", RELAY_DEBOUNCE_COOLDOWN_MS - (now - lastWaterPumpSwitch));
+                  state ? "ON" : "OFF", minCooldown - (now - lastWaterPumpSwitch));
     return;
   }
 
   int offLevel = relayActiveLow ? HIGH : LOW;
   int onLevel  = relayActiveLow ? LOW : HIGH;
 
-  // Rain lockout check ONLY for auto/schedule modes when safety is enforced
-  if (state && !safetyOverride && rainLocked && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
-    Serial.printf("[SAFETY BLOCK] Water Pump blocked: 24h Rain Lockout!\n");
-    pumpWaterActive = false;
-    for (int i = 0; i < NUM_PINS_M1; i++) digitalWrite(PINS_MOTOR1[i], offLevel);
-    return;
+  // Safety checks when starting pump in Auto/Schedule modes (respecting individually enabled sensors!)
+  if (state && !safetyOverride && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
+    if (rainSensorEnabled && (instantRain || rainLocked)) {
+      Serial.printf("[SAFETY BLOCK] Water Pump blocked: Rain detected / 24h Rain Lockout!\n");
+      pumpWaterActive = false;
+      for (int i = 0; i < NUM_PINS_M1; i++) digitalWrite(PINS_MOTOR1[i], offLevel);
+      return;
+    }
+    if (waterSensorEnabled && waterDistCm > 0.0f && waterTankPercent < 15) {
+      Serial.printf("[SAFETY BLOCK] Water Pump blocked: Reservoir empty (<15%%)!\n");
+      pumpWaterActive = false;
+      for (int i = 0; i < NUM_PINS_M1; i++) digitalWrite(PINS_MOTOR1[i], offLevel);
+      return;
+    }
   }
 
   pumpWaterActive = state;
@@ -343,20 +433,29 @@ void setFertPump(bool state, const char* reason) {
   }
 
   unsigned long now = millis();
-  if (now - lastFertPumpSwitch < RELAY_DEBOUNCE_COOLDOWN_MS && lastFertPumpSwitch > 0) {
+  unsigned long minCooldown = (!state && isEmergencyCutoffReason(reason)) ? EMERGENCY_OFF_DEBOUNCE_MS : RELAY_DEBOUNCE_COOLDOWN_MS;
+  if (now - lastFertPumpSwitch < minCooldown && lastFertPumpSwitch > 0) {
     Serial.printf("[DEBOUNCE] Fert Pump transition to %s rejected: cooldown active (%lums remaining)\n",
-                  state ? "ON" : "OFF", RELAY_DEBOUNCE_COOLDOWN_MS - (now - lastFertPumpSwitch));
+                  state ? "ON" : "OFF", minCooldown - (now - lastFertPumpSwitch));
     return;
   }
 
   int offLevel = relayActiveLow ? HIGH : LOW;
   int onLevel  = relayActiveLow ? LOW : HIGH;
 
-  if (state && !safetyOverride && rainLocked && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
-    Serial.printf("[SAFETY BLOCK] Fertigation Pump blocked: 24h Rain Lockout!\n");
-    pumpFertActive = false;
-    for (int i = 0; i < NUM_PINS_M2; i++) digitalWrite(PINS_MOTOR2[i], offLevel);
-    return;
+  if (state && !safetyOverride && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
+    if (rainSensorEnabled && (instantRain || rainLocked)) {
+      Serial.printf("[SAFETY BLOCK] Fertigation Pump blocked: Rain detected / 24h Rain Lockout!\n");
+      pumpFertActive = false;
+      for (int i = 0; i < NUM_PINS_M2; i++) digitalWrite(PINS_MOTOR2[i], offLevel);
+      return;
+    }
+    if (waterSensorEnabled && waterDistCm > 0.0f && waterTankPercent < 15) {
+      Serial.printf("[SAFETY BLOCK] Fertigation Pump blocked: Reservoir empty (<15%%)!\n");
+      pumpFertActive = false;
+      for (int i = 0; i < NUM_PINS_M2; i++) digitalWrite(PINS_MOTOR2[i], offLevel);
+      return;
+    }
   }
 
   pumpFertActive = state;
@@ -400,45 +499,65 @@ float readUltrasonicFiltered() {
 
 // ==================== SENSOR READING ====================
 void readSensors() {
-  // 1. Capacitive Soil Moisture
-  soilRaw = analogRead(PIN_SOIL_ANALOG);
-  soilPercent = map(soilRaw, SOIL_DRY_RAW, SOIL_WET_RAW, 0, 100);
-  soilPercent = constrain(soilPercent, 0, 100);
-
-  // 2. Raindrop Sensor
-  instantRain = (digitalRead(PIN_RAIN_DIGITAL) == LOW);
-  rainAnalog = analogRead(PIN_RAIN_ANALOG);
-
-  if (instantRain) {
-    lastRainTriggerTime = millis();
-    rainLocked = true;
+  // 1. Capacitive Soil Moisture (Only polled when enabled)
+  if (soilSensorEnabled) {
+    soilRaw = analogRead(PIN_SOIL_ANALOG);
+    soilPercent = map(soilRaw, SOIL_DRY_RAW, SOIL_WET_RAW, 0, 100);
+    soilPercent = constrain(soilPercent, 0, 100);
+  } else {
+    soilRaw = 0;
+    soilPercent = 0;
   }
 
-  if (rainLocked) {
-    unsigned long elapsed = millis() - lastRainTriggerTime;
-    if (elapsed < RAIN_LOCKOUT_MS) {
-      rainRemainingSec = (RAIN_LOCKOUT_MS - elapsed) / 1000UL;
+  // 2. Raindrop Sensor (Only polled when enabled)
+  if (rainSensorEnabled) {
+    instantRain = (digitalRead(PIN_RAIN_DIGITAL) == LOW);
+    rainAnalog = analogRead(PIN_RAIN_ANALOG);
+
+    if (instantRain) {
+      if (!rainLocked) {
+        Serial.println("[RAIN] Water detected on active Rain Sensor! Activating Rain Lockout.");
+      }
+      lastRainTriggerTime = millis();
+      rainLocked = true;
+    }
+
+    if (rainLocked) {
+      unsigned long elapsed = millis() - lastRainTriggerTime;
+      if (elapsed < RAIN_LOCKOUT_MS) {
+        rainRemainingSec = (RAIN_LOCKOUT_MS - elapsed) / 1000UL;
+      } else {
+        rainLocked = false;
+        rainRemainingSec = 0;
+        Serial.println("[RAIN] 24-Hour Lockout completed. Normal operations unlocked.");
+      }
     } else {
-      rainLocked = false;
       rainRemainingSec = 0;
-      Serial.println("[RAIN] 24-Hour Lockout completed. Normal operations unlocked.");
     }
   } else {
+    instantRain = false;
+    rainAnalog = 0;
+    rainLocked = false;
     rainRemainingSec = 0;
   }
 
-  // 3. HC-SR04 Ultrasonic Reservoir Level
-  float dist = readUltrasonicFiltered();
-  if (dist > 0.0f) {
-    waterDistCm = dist;
-    if (waterDistCm <= TANK_FULL_DIST_CM) {
-      waterTankPercent = 100;
-    } else if (waterDistCm >= TANK_EMPTY_DIST_CM) {
-      waterTankPercent = 0;
-    } else {
-      waterTankPercent = (int)(((TANK_EMPTY_DIST_CM - waterDistCm) / (TANK_EMPTY_DIST_CM - TANK_FULL_DIST_CM)) * 100.0f);
-      waterTankPercent = constrain(waterTankPercent, 0, 100);
+  // 3. HC-SR04 Ultrasonic Reservoir Level (Only polled when enabled)
+  if (waterSensorEnabled) {
+    float dist = readUltrasonicFiltered();
+    if (dist > 0.0f) {
+      waterDistCm = dist;
+      if (waterDistCm <= TANK_FULL_DIST_CM) {
+        waterTankPercent = 100;
+      } else if (waterDistCm >= TANK_EMPTY_DIST_CM) {
+        waterTankPercent = 0;
+      } else {
+        waterTankPercent = (int)(((TANK_EMPTY_DIST_CM - waterDistCm) / (TANK_EMPTY_DIST_CM - TANK_FULL_DIST_CM)) * 100.0f);
+        waterTankPercent = constrain(waterTankPercent, 0, 100);
+      }
     }
+  } else {
+    waterDistCm = -1.0f;
+    waterTankPercent = 100;
   }
 }
 
@@ -469,6 +588,7 @@ void processScheduler() {
       Serial.println("[TIMER] Scheduled run finished. Turning both motors OFF.");
       setWaterPump(false, "Timer Finished");
       setFertPump(false, "Timer Finished");
+      publishTelemetry();
     }
     return;
   }
@@ -479,10 +599,17 @@ void processScheduler() {
         if (curHour == schedules[i].hour && curMin == schedules[i].minute) {
           schedules[i].ranToday = true;
 
-          if (!safetyOverride && rainLocked) {
-            Serial.printf("[TIMER SKIP] Schedule %d (%02d:%02d) skipped due to Rain Lockout.\n",
-                          i + 1, schedules[i].hour, schedules[i].minute);
-            continue;
+          if (!safetyOverride) {
+            if (rainSensorEnabled && (instantRain || rainLocked)) {
+              Serial.printf("[TIMER SKIP] Schedule %d (%02d:%02d) skipped due to Rain Lockout.\n",
+                            i + 1, schedules[i].hour, schedules[i].minute);
+              continue;
+            }
+            if (waterSensorEnabled && waterDistCm > 0.0f && waterTankPercent < 15) {
+              Serial.printf("[TIMER SKIP] Schedule %d (%02d:%02d) skipped due to Empty Tank (<15%%).\n",
+                            i + 1, schedules[i].hour, schedules[i].minute);
+              continue;
+            }
           }
 
           scheduleRunning = true;
@@ -499,6 +626,7 @@ void processScheduler() {
             setWaterPump(true, "Timer Schedule (Both)");
             setFertPump(true, "Timer Schedule (Both)");
           }
+          publishTelemetry();
           break;
         }
       }
@@ -534,36 +662,45 @@ void processScheduler() {
 
 // ==================== AUTOMATION ENGINE ====================
 void processAutomation() {
-  // Boot stabilization grace period (first 25 seconds after power-on):
-  // Guarantees motors NEVER auto-start at boot while sensors settle and WiFi connects
-  if (millis() < 25000UL) {
-    return;
-  }
+  bool waterEmpty = (waterSensorEnabled && waterDistCm > 0.0f && waterTankPercent < 15);
+  bool rainActive = (rainSensorEnabled && (instantRain || rainLocked));
 
-  // Dry-run cutoff if reservoir is empty (only when safety is actively enforced)
-  if (!safetyOverride && (waterDistCm > 0.0f && waterTankPercent < 15) && (pumpWaterActive || pumpFertActive)) {
-    Serial.println("[SAFETY CUTOFF] Water Reservoir empty (<15%)! Stopping motors.");
+  // 1. Dry-run cutoff if Water Level Sensor is enabled & reservoir empty (<15%)
+  if (!safetyOverride && waterEmpty && (pumpWaterActive || pumpFertActive)) {
+    Serial.println("[SAFETY CUTOFF] Water Reservoir empty (<15%)! Stopping motors immediately.");
     scheduleRunning = false;
     setWaterPump(false, "Dry-Run Cutoff");
     setFertPump(false, "Dry-Run Cutoff");
+    publishTelemetry();
     return;
   }
 
-  if (!safetyOverride && rainLocked && (pumpWaterActive || pumpFertActive) && (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
-    Serial.println("[SAFETY CUTOFF] Rain lockout active! Stopping both motors.");
+  // 2. Rain cutoff if Rain Sensor is enabled & wet (in Smart Auto or Schedule mode)
+  if (!safetyOverride && rainActive && (pumpWaterActive || pumpFertActive) &&
+      (currentMode == MODE_AUTO_IRRIGATE || currentMode == MODE_SCHEDULE_ONLY)) {
+    Serial.println("[SAFETY CUTOFF] Rain detected on active Rain Sensor! Clicking relays OFF immediately.");
     scheduleRunning = false;
-    setWaterPump(false, "Rain Lockout");
-    setFertPump(false, "Rain Lockout");
+    setWaterPump(false, "Rain Lockout Cutoff");
+    setFertPump(false, "Rain Lockout Cutoff");
+    publishTelemetry();
     return;
   }
 
-  if (currentMode == MODE_AUTO_IRRIGATE && !scheduleRunning) {
-    if (soilPercent < SOIL_DRY_THRESHOLD && !pumpWaterActive && (safetyOverride || !rainLocked)) {
+  // Boot stabilization grace period before auto-starting pumps (15 seconds)
+  if (millis() < 15000UL) {
+    return;
+  }
+
+  // 3. Smart Auto Soil Moisture Automation (only runs if Soil Humidity Sensor is enabled)
+  if (currentMode == MODE_AUTO_IRRIGATE && !scheduleRunning && soilSensorEnabled) {
+    if (soilPercent < SOIL_DRY_THRESHOLD && !pumpWaterActive && (safetyOverride || (!rainActive && !waterEmpty))) {
       Serial.println("[AUTO TRIGGER] Soil moisture < 35%. Starting Motor 1 (Watering).");
       setWaterPump(true, "Soil Sensor Auto");
+      publishTelemetry();
     } else if (soilPercent >= SOIL_WET_THRESHOLD && pumpWaterActive) {
       Serial.println("[AUTO SHUTOFF] Optimal moisture reached (>= 70%). Stopping Motor 1 (Watering).");
       setWaterPump(false, "Soil Saturated");
+      publishTelemetry();
     }
   }
 }
@@ -575,16 +712,20 @@ void publishTelemetry() {
   doc["time"]     = currentTimeStr;
   doc["soil"]     = soilPercent;
   doc["soilRaw"]  = soilRaw;
-  doc["soilAlert"]= (soilPercent < SOIL_DRY_THRESHOLD);
+  doc["soilAlert"]= (soilSensorEnabled && soilPercent < SOIL_DRY_THRESHOLD);
   
   doc["water"]    = waterTankPercent;
-  doc["waterCm"]  = (waterDistCm > 0.0f) ? String(waterDistCm, 1) : "0.0";
-  doc["waterLow"] = (waterDistCm > 0.0f && waterTankPercent < 20);
-  doc["waterEmpty"] = (waterDistCm > 0.0f && waterTankPercent < 10);
+  doc["waterCm"]  = (waterSensorEnabled && waterDistCm > 0.0f) ? String(waterDistCm, 1) : "0.0";
+  doc["waterLow"] = (waterSensorEnabled && waterDistCm > 0.0f && waterTankPercent < 20);
+  doc["waterEmpty"] = (waterSensorEnabled && waterDistCm > 0.0f && waterTankPercent < 10);
 
   doc["rainNow"]  = instantRain;
   doc["rainLock"] = rainLocked;
   doc["rainSec"]  = rainRemainingSec;
+
+  doc["soilEn"]   = soilSensorEnabled;
+  doc["waterEn"]  = waterSensorEnabled;
+  doc["rainEn"]   = rainSensorEnabled;
 
   doc["online"]   = true;
   doc["uptime"]   = (unsigned long)(millis() / 1000);
@@ -597,7 +738,7 @@ void publishTelemetry() {
   doc["nextRun"]  = nextRunString;
   doc["safeBypass"] = safetyOverride;
   doc["relLow"]     = relayActiveLow;
-  doc["ultraEn"]    = (waterDistCm > 0.0f);
+  doc["ultraEn"]    = (waterSensorEnabled && waterDistCm > 0.0f);
 
   JsonArray arr = doc.createNestedArray("schedules");
   for (int i = 0; i < numSchedules; i++) {
@@ -641,13 +782,35 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     return;
   }
 
+  // Individual Sensor Enable/Disable Toggles (Soil, Water Level, Rain) -> Persisted in NVS
+  if (doc.containsKey("soilEn") || doc.containsKey("waterEn") || doc.containsKey("rainEn")) {
+    bool newSoil  = doc.containsKey("soilEn")  ? (bool)doc["soilEn"]  : soilSensorEnabled;
+    bool newWater = doc.containsKey("waterEn") ? (bool)doc["waterEn"] : waterSensorEnabled;
+    bool newRain  = doc.containsKey("rainEn")  ? (bool)doc["rainEn"]  : rainSensorEnabled;
+    saveSensorConfig(newSoil, newWater, newRain);
+    readSensors();
+    processAutomation();
+    publishTelemetry();
+  }
+
+  // Station PIN Update -> Persisted in NVS
+  if (doc.containsKey("newPin")) {
+    String np = doc["newPin"].as<String>();
+    np.trim();
+    if (np.length() >= 4) {
+      savePasscode(np);
+      publishTelemetry();
+    }
+  }
+
   // Safety Mechanism Override
   if (doc.containsKey("setSafetyBypass") || doc.containsKey("safetyBypass") || doc.containsKey("safetyOverride")) {
-    bool bypassVal = true;
+    bool bypassVal = false;
     if (doc.containsKey("setSafetyBypass")) bypassVal = doc["setSafetyBypass"];
     else if (doc.containsKey("safetyBypass")) bypassVal = doc["safetyBypass"];
     else if (doc.containsKey("safetyOverride")) bypassVal = doc["safetyOverride"];
     saveSafetyOverride(bypassVal);
+    processAutomation();
     publishTelemetry();
   }
 
@@ -731,8 +894,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   if (doc.containsKey("mode")) {
     int m = doc["mode"];
     if (m >= 0 && m <= 3) {
-      currentMode = (OperationMode)m;
-      Serial.printf("[MODE] Switched to Mode %d\n", m);
+      saveModeToNVS((OperationMode)m);
+      readSensors();
+      processAutomation();
+      Serial.printf("[MODE] Switched & Saved to NVS: Mode %d\n", m);
     }
   }
 
@@ -978,9 +1143,11 @@ void loop() {
       publishTelemetry();
     }
 
-    Serial.printf("[%s] WiFi:%s | Soil:%d%% | Water:%d%%(%.1fcm) | Rain:%s(lock:%us) | Motor1(Water):%s | Motor2(Fert):%s | Mode:%d | Next:%s\n",
+    Serial.printf("[%s] WiFi:%s | En(S:%d,W:%d,R:%d) | Safe:%s | Soil:%d%% | Water:%d%%(%.1fcm) | Rain:%s(lock:%us) | M1:%s | M2:%s | Mode:%d | Next:%s\n",
                   currentTimeStr,
                   (WiFi.status() == WL_CONNECTED) ? "OK" : "NO",
+                  soilSensorEnabled ? 1 : 0, waterSensorEnabled ? 1 : 0, rainSensorEnabled ? 1 : 0,
+                  safetyOverride ? "BYPASS" : "ON",
                   soilPercent, waterTankPercent, waterDistCm,
                   instantRain ? "WET" : "DRY", rainRemainingSec,
                   pumpWaterActive ? "ON" : "OFF", pumpFertActive ? "ON" : "OFF",

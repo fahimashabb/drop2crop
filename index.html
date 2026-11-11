@@ -326,10 +326,16 @@
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
 
       <!-- 1. Capacitive Soil Moisture Card -->
-      <div class="glass-card rounded-2xl p-6 flex flex-col justify-between relative overflow-hidden">
-        <div class="flex items-center justify-between">
+      <div id="soilCard" class="glass-card rounded-2xl p-6 flex flex-col justify-between relative overflow-hidden transition-all duration-300">
+        <div class="flex items-center justify-between gap-2">
           <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Soil Moisture</span>
-          <span id="soilBadge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">Optimal</span>
+          <div class="flex items-center gap-2">
+            <button id="toggleSoilBtn" onclick="toggleSensorState('soil')" class="px-2.5 py-1 rounded-full text-[11px] font-bold border transition flex items-center gap-1 bg-emerald-500/20 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/30" title="Turn Soil Humidity Sensor ON/OFF (Saved to ESP32 Flash)">
+              <span id="toggleSoilDot" class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              <span id="toggleSoilText">ON</span>
+            </button>
+            <span id="soilBadge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">Optimal</span>
+          </div>
         </div>
 
         <div class="flex flex-col items-center justify-center my-6">
@@ -353,10 +359,16 @@
       </div>
 
       <!-- 2. Ultrasonic Water Level Reservoir Card -->
-      <div class="glass-card rounded-2xl p-6 flex flex-col justify-between relative overflow-hidden">
-        <div class="flex items-center justify-between">
+      <div id="waterCard" class="glass-card rounded-2xl p-6 flex flex-col justify-between relative overflow-hidden transition-all duration-300">
+        <div class="flex items-center justify-between gap-2">
           <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Water Reservoir</span>
-          <span id="waterBadge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400">Normal</span>
+          <div class="flex items-center gap-2">
+            <button id="toggleWaterBtn" onclick="toggleSensorState('water')" class="px-2.5 py-1 rounded-full text-[11px] font-bold border transition flex items-center gap-1 bg-sky-500/20 border-sky-500/50 text-sky-300 hover:bg-sky-500/30" title="Turn Water Level Sensor ON/OFF (Saved to ESP32 Flash)">
+              <span id="toggleWaterDot" class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+              <span id="toggleWaterText">ON</span>
+            </button>
+            <span id="waterBadge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400">Normal</span>
+          </div>
         </div>
 
         <div class="flex items-center justify-center gap-6 my-4">
@@ -383,10 +395,16 @@
       </div>
 
       <!-- 3. Rain & Weather Sensor Card -->
-      <div class="glass-card rounded-2xl p-6 flex flex-col justify-between relative overflow-hidden">
-        <div class="flex items-center justify-between">
+      <div id="rainCard" class="glass-card rounded-2xl p-6 flex flex-col justify-between relative overflow-hidden transition-all duration-300">
+        <div class="flex items-center justify-between gap-2">
           <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Rain Weather</span>
-          <span id="rainBadge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-700 text-slate-300">Checking...</span>
+          <div class="flex items-center gap-2">
+            <button id="toggleRainBtn" onclick="toggleSensorState('rain')" class="px-2.5 py-1 rounded-full text-[11px] font-bold border transition flex items-center gap-1 bg-emerald-500/20 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/30" title="Turn Rain Sensor ON/OFF (Saved to ESP32 Flash)">
+              <span id="toggleRainDot" class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              <span id="toggleRainText">ON</span>
+            </button>
+            <span id="rainBadge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-700 text-slate-300">Checking...</span>
+          </div>
         </div>
 
         <div class="flex flex-col items-center justify-center my-6 text-center">
@@ -444,6 +462,7 @@
           <button id="modeAutoBtn" onclick="sendModeCommand(0)" class="p-3.5 rounded-xl border transition text-left flex flex-col gap-1 bg-emerald-500/10 border-emerald-500/50 text-emerald-300 shadow-lg shadow-emerald-500/10">
             <span class="font-bold text-xs flex items-center gap-1.5">💧 Smart Auto</span>
             <span class="text-[11px] text-slate-400 leading-snug">Soil &lt; 35% triggers pump automatically</span>
+            <span id="autoSensorsSummary" class="text-[10px] font-mono text-emerald-400/90 mt-0.5">Active: Soil + Water + Rain + Schedule</span>
           </button>
           
           <button id="modeSchedBtn" onclick="sendModeCommand(1)" class="p-3.5 rounded-xl border border-slate-700 hover:border-slate-600 bg-slate-900/40 text-slate-300 transition text-left flex flex-col gap-1">
@@ -1083,6 +1102,9 @@
     let currentMode = 0;
     let isRainLocked = false;
     let activeSchedules = [];
+    let soilSensorEnabled = true;
+    let waterSensorEnabled = true;
+    let rainSensorEnabled = true;
 
     // Synthesized Audio Alarms
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1451,67 +1473,89 @@
         document.getElementById('nextRunBadge').innerText = data.nextRun;
       }
 
+      // Sync Sensor Enable States from ESP32 NVS Telemetry
+      if (data.soilEn !== undefined) soilSensorEnabled = Boolean(data.soilEn);
+      if (data.waterEn !== undefined) waterSensorEnabled = Boolean(data.waterEn);
+      if (data.rainEn !== undefined) rainSensorEnabled = Boolean(data.rainEn);
+      updateSensorEnableUI();
+
       // 1. Soil Moisture
       const soilVal = data.soil ?? 0;
-      document.getElementById('soilValue').innerText = soilVal + '%';
-      document.getElementById('soilRaw').innerText = data.soilRaw ?? '--';
-
-      const offset = 251.2 - (251.2 * (soilVal / 100));
-      document.getElementById('soilCircle').style.strokeDashoffset = offset;
-
       const soilBadge = document.getElementById('soilBadge');
       const soilCircle = document.getElementById('soilCircle');
       const soilAlert = document.getElementById('soilAlertBanner');
 
-      if (soilVal < 35) {
-        soilBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400';
-        soilBadge.innerText = 'Parched Dry';
-        soilCircle.style.stroke = '#ef4444';
-        soilAlert.classList.remove('hidden');
-      } else if (soilVal >= 70) {
-        soilBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400';
-        soilBadge.innerText = 'Saturated';
-        soilCircle.style.stroke = '#38bdf8';
+      if (!soilSensorEnabled) {
+        document.getElementById('soilValue').innerText = 'OFF';
+        document.getElementById('soilRaw').innerText = 'Disabled';
+        soilCircle.style.strokeDashoffset = 251.2;
+        soilCircle.style.stroke = '#475569';
+        soilBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400';
+        soilBadge.innerText = 'Disabled';
         soilAlert.classList.add('hidden');
       } else {
-        soilBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
-        soilBadge.innerText = 'Optimal';
-        soilCircle.style.stroke = '#10b981';
-        soilAlert.classList.add('hidden');
+        document.getElementById('soilValue').innerText = soilVal + '%';
+        document.getElementById('soilRaw').innerText = data.soilRaw ?? '--';
+
+        const offset = 251.2 - (251.2 * (soilVal / 100));
+        soilCircle.style.strokeDashoffset = offset;
+
+        if (soilVal < 35) {
+          soilBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400';
+          soilBadge.innerText = 'Parched Dry';
+          soilCircle.style.stroke = '#ef4444';
+          soilAlert.classList.remove('hidden');
+        } else if (soilVal >= 70) {
+          soilBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400';
+          soilBadge.innerText = 'Saturated';
+          soilCircle.style.stroke = '#38bdf8';
+          soilAlert.classList.add('hidden');
+        } else {
+          soilBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
+          soilBadge.innerText = 'Optimal';
+          soilCircle.style.stroke = '#10b981';
+          soilAlert.classList.add('hidden');
+        }
       }
 
       // 2. Water Reservoir Level
       const waterVal = data.water ?? 0;
-      document.getElementById('waterValue').innerText = waterVal + '%';
-      document.getElementById('waterCm').innerText = (data.waterCm ?? '--') + ' cm';
-      document.getElementById('tankFill').style.height = waterVal + '%';
-
       const waterBadge = document.getElementById('waterBadge');
       const tankAlert = document.getElementById('tankAlertBanner');
 
-      if (waterVal < 15) {
-        waterBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400';
-        waterBadge.innerText = 'Empty Cutoff';
-        tankAlert.classList.remove('hidden');
-        triggerWarningAlarm();
-      } else if (waterVal < 20) {
-        waterBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400';
-        waterBadge.innerText = 'Low Warning';
-        tankAlert.classList.remove('hidden');
-        triggerWarningAlarm();
-      } else {
-        waterBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400';
-        waterBadge.innerText = 'Normal';
+      if (!waterSensorEnabled) {
+        document.getElementById('waterValue').innerText = 'OFF';
+        document.getElementById('waterCm').innerText = 'Disabled';
+        document.getElementById('tankFill').style.height = '0%';
+        waterBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400';
+        waterBadge.innerText = 'Disabled';
         tankAlert.classList.add('hidden');
+      } else {
+        document.getElementById('waterValue').innerText = waterVal + '%';
+        document.getElementById('waterCm').innerText = (data.waterCm ?? '--') + ' cm';
+        document.getElementById('tankFill').style.height = waterVal + '%';
+
+        if (waterVal < 15) {
+          waterBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400';
+          waterBadge.innerText = 'Empty Cutoff';
+          tankAlert.classList.remove('hidden');
+          triggerWarningAlarm();
+        } else if (waterVal < 20) {
+          waterBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400';
+          waterBadge.innerText = 'Low Warning';
+          tankAlert.classList.remove('hidden');
+          triggerWarningAlarm();
+        } else {
+          waterBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400';
+          waterBadge.innerText = 'Normal';
+          tankAlert.classList.add('hidden');
+        }
       }
 
       // 3. Rain Sensor & Lockout
       const rainNow = data.rainNow ?? false;
-      isRainLocked = data.rainLock ?? false;
+      isRainLocked = rainSensorEnabled ? (data.rainLock ?? false) : false;
       const rainSec = data.rainSec ?? 0;
-
-      document.getElementById('rainLockState').innerText = isRainLocked ? 'Active' : 'Inactive';
-      document.getElementById('rainSecText').innerText = rainSec + 's';
 
       const rainBadge = document.getElementById('rainBadge');
       const rainIcon = document.getElementById('rainIcon');
@@ -1519,28 +1563,42 @@
       const rainSubText = document.getElementById('rainSubText');
       const rainLockBanner = document.getElementById('rainLockBanner');
 
-      if (rainNow) {
-        rainIcon.innerText = '🌧️';
-        rainBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/20 border border-sky-500/40 text-sky-300';
-        rainBadge.innerText = 'Raining Now';
-        rainStatusText.innerText = 'Rainfall Detected';
-        rainSubText.innerText = 'Water drops on sensor plate';
-      } else {
-        rainIcon.innerText = '☀️';
-        rainBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
-        rainBadge.innerText = 'Clear';
-        rainStatusText.innerText = 'Clear Weather';
-        rainSubText.innerText = 'Safe for precision fertigation';
-      }
-
-      if (isRainLocked && rainSec > 0) {
-        rainLockBanner.classList.remove('hidden');
-        const h = Math.floor(rainSec / 3600).toString().padStart(2, '0');
-        const m = Math.floor((rainSec % 3600) / 60).toString().padStart(2, '0');
-        const s = (rainSec % 60).toString().padStart(2, '0');
-        document.getElementById('rainCountdown').innerText = `${h}:${m}:${s}`;
-      } else {
+      if (!rainSensorEnabled) {
+        document.getElementById('rainLockState').innerText = 'Bypassed';
+        document.getElementById('rainSecText').innerText = '--';
+        rainIcon.innerText = '⏸️';
+        rainBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400';
+        rainBadge.innerText = 'Disabled';
+        rainStatusText.innerText = 'Sensor Turned Off';
+        rainSubText.innerText = 'Ignored by Auto & Schedules';
         rainLockBanner.classList.add('hidden');
+      } else {
+        document.getElementById('rainLockState').innerText = isRainLocked ? 'Active' : 'Inactive';
+        document.getElementById('rainSecText').innerText = rainSec + 's';
+
+        if (rainNow) {
+          rainIcon.innerText = '🌧️';
+          rainBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/20 border border-sky-500/40 text-sky-300';
+          rainBadge.innerText = 'Raining Now';
+          rainStatusText.innerText = 'Rainfall Detected';
+          rainSubText.innerText = 'Water drops on sensor plate';
+        } else {
+          rainIcon.innerText = '☀️';
+          rainBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
+          rainBadge.innerText = 'Clear';
+          rainStatusText.innerText = 'Clear Weather';
+          rainSubText.innerText = 'Safe for precision fertigation';
+        }
+
+        if (isRainLocked && rainSec > 0) {
+          rainLockBanner.classList.remove('hidden');
+          const h = Math.floor(rainSec / 3600).toString().padStart(2, '0');
+          const m = Math.floor((rainSec % 3600) / 60).toString().padStart(2, '0');
+          const s = (rainSec % 60).toString().padStart(2, '0');
+          document.getElementById('rainCountdown').innerText = `${h}:${m}:${s}`;
+        } else {
+          rainLockBanner.classList.add('hidden');
+        }
       }
 
       // 4. Schedules List Rendering
@@ -1576,11 +1634,11 @@
         notice.classList.remove('hidden');
         notice.className = 'text-xs text-amber-300 bg-amber-950/40 border border-amber-500/40 p-3 rounded-xl flex items-center justify-between gap-2';
         noticeText.innerHTML = '<span class="flex items-center gap-2"><span>⚠️</span> <span><strong>FORCE MODE ACTIVE:</strong> Safety mechanism is turned OFF. Dry-run cutoff and rain lockout are bypassed. Motors can be operated forcefully.</span></span>';
-      } else if (waterVal < 15) {
+      } else if (waterSensorEnabled && waterVal < 15) {
         notice.classList.remove('hidden');
         notice.className = 'text-xs text-rose-400 bg-rose-950/40 border border-rose-500/30 p-3 rounded-xl flex items-center justify-between gap-2';
         noticeText.innerHTML = '<span class="flex items-center gap-2"><span>🛑</span> <span><strong>Dry-Run Protection Active:</strong> Reservoir is below 15%. Both motors are locked to protect pumps. (Turn off safety with PIN to force run).</span></span>';
-      } else if (isRainLocked && (currentMode === 0 || currentMode === 1)) {
+      } else if (rainSensorEnabled && isRainLocked && (currentMode === 0 || currentMode === 1)) {
         notice.classList.remove('hidden');
         notice.className = 'text-xs text-rose-400 bg-rose-950/40 border border-rose-500/30 p-3 rounded-xl flex items-center justify-between gap-2';
         noticeText.innerHTML = '<span class="flex items-center gap-2"><span>🌧️</span> <span><strong>Rain Delay Active:</strong> 24-hour lockout in progress. Automated & scheduled irrigation paused.</span></span>';
@@ -1751,6 +1809,67 @@
       const payload = JSON.stringify({ auth: STATION_PIN, clearRainLock: true });
       client.publish(TOPIC_COMMAND, payload);
       logTerm(`Tx -> Clear Rain Lockout`);
+    }
+
+    function updateSensorEnableUI() {
+      const cfg = [
+        { key: 'soil', en: soilSensorEnabled, cardId: 'soilCard', btnId: 'toggleSoilBtn', dotId: 'toggleSoilDot', txtId: 'toggleSoilText', activeCls: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/30', dotCls: 'bg-emerald-400' },
+        { key: 'water', en: waterSensorEnabled, cardId: 'waterCard', btnId: 'toggleWaterBtn', dotId: 'toggleWaterDot', txtId: 'toggleWaterText', activeCls: 'bg-sky-500/20 border-sky-500/50 text-sky-300 hover:bg-sky-500/30', dotCls: 'bg-sky-400' },
+        { key: 'rain', en: rainSensorEnabled, cardId: 'rainCard', btnId: 'toggleRainBtn', dotId: 'toggleRainDot', txtId: 'toggleRainText', activeCls: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/30', dotCls: 'bg-emerald-400' }
+      ];
+
+      cfg.forEach(item => {
+        const card = document.getElementById(item.cardId);
+        const btn = document.getElementById(item.btnId);
+        const dot = document.getElementById(item.dotId);
+        const txt = document.getElementById(item.txtId);
+        if (!card || !btn || !dot || !txt) return;
+
+        if (item.en) {
+          card.classList.remove('opacity-75');
+          btn.className = `px-2.5 py-1 rounded-full text-[11px] font-bold border transition flex items-center gap-1 ${item.activeCls}`;
+          dot.className = `w-1.5 h-1.5 rounded-full ${item.dotCls}`;
+          txt.innerText = 'ON';
+        } else {
+          card.classList.add('opacity-75');
+          btn.className = 'px-2.5 py-1 rounded-full text-[11px] font-bold border transition flex items-center gap-1 bg-slate-800 border-slate-600 text-slate-400 hover:bg-slate-700';
+          dot.className = 'w-1.5 h-1.5 rounded-full bg-slate-500';
+          txt.innerText = 'OFF';
+        }
+      });
+
+      const summary = document.getElementById('autoSensorsSummary');
+      if (summary) {
+        const activeParts = [];
+        if (soilSensorEnabled) activeParts.push('Soil');
+        if (waterSensorEnabled) activeParts.push('Water');
+        if (rainSensorEnabled) activeParts.push('Rain');
+        activeParts.push('Schedule');
+        summary.innerText = 'Active: ' + activeParts.join(' + ');
+      }
+    }
+
+    function toggleSensorState(sensorType) {
+      if (!client || !client.connected) {
+        logTerm('⚠️ Connect to MQTT broker first before changing sensor settings.');
+        return;
+      }
+
+      if (sensorType === 'soil') soilSensorEnabled = !soilSensorEnabled;
+      else if (sensorType === 'water') waterSensorEnabled = !waterSensorEnabled;
+      else if (sensorType === 'rain') rainSensorEnabled = !rainSensorEnabled;
+      else return;
+
+      updateSensorEnableUI();
+
+      const payload = JSON.stringify({
+        auth: STATION_PIN,
+        soilEn: soilSensorEnabled,
+        waterEn: waterSensorEnabled,
+        rainEn: rainSensorEnabled
+      });
+      client.publish(TOPIC_COMMAND, payload);
+      logTerm(`Tx -> Sensor Config Saved to Flash (Soil:${soilSensorEnabled ? 'ON' : 'OFF'}, Water:${waterSensorEnabled ? 'ON' : 'OFF'}, Rain:${rainSensorEnabled ? 'ON' : 'OFF'})`);
     }
 
     // Initialize on page load
