@@ -48,8 +48,8 @@ const int PINS_MOTOR2[] = {18, 14, 47, 10};
 const int NUM_PINS_M2   = 4;
 
 // ==================== CALIBRATION & THRESHOLDS ====================
-const int SOIL_DRY_RAW         = 145;  // Force-calibrated to current dry-air baseline (~131-138 raw) -> 0%
-const int SOIL_WET_RAW         = 240;  // Calibrated to submerged water reading (~212-246 raw) -> 100%
+const int SOIL_DRY_RAW         = 205;  // Force-calibrated dry-air ceiling (<=205 -> 0%)
+const int SOIL_WET_RAW         = 245;  // Submerged water threshold (>=245 -> 100%)
 const int SOIL_DRY_THRESHOLD   = 35;   // Auto-irrigation starts when soil < 35%
 const int SOIL_WET_THRESHOLD   = 70;   // Auto-irrigation stops when soil >= 70%
 const unsigned long RAIN_LOCKOUT_MS = 86400000UL; // 24 Hours lockout
