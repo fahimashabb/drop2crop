@@ -1481,6 +1481,7 @@
 
       // 1. Soil Moisture
       const soilVal = data.soil ?? 0;
+      const soilFault = Boolean(data.soilFault);
       const soilBadge = document.getElementById('soilBadge');
       const soilCircle = document.getElementById('soilCircle');
       const soilAlert = document.getElementById('soilAlertBanner');
@@ -1492,6 +1493,14 @@
         soilCircle.style.stroke = '#475569';
         soilBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400';
         soilBadge.innerText = 'Disabled';
+        soilAlert.classList.add('hidden');
+      } else if (soilFault) {
+        document.getElementById('soilValue').innerText = '--%';
+        document.getElementById('soilRaw').innerText = (data.soilRaw ?? '--') + ' (No Signal)';
+        soilCircle.style.strokeDashoffset = 251.2;
+        soilCircle.style.stroke = '#f59e0b';
+        soilBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400';
+        soilBadge.innerText = 'Check Wire/3V3';
         soilAlert.classList.add('hidden');
       } else {
         document.getElementById('soilValue').innerText = soilVal + '%';
@@ -1520,6 +1529,7 @@
 
       // 2. Water Reservoir Level
       const waterVal = data.water ?? 0;
+      const waterFault = Boolean(data.waterFault);
       const waterBadge = document.getElementById('waterBadge');
       const tankAlert = document.getElementById('tankAlertBanner');
 
@@ -1529,6 +1539,13 @@
         document.getElementById('tankFill').style.height = '0%';
         waterBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400';
         waterBadge.innerText = 'Disabled';
+        tankAlert.classList.add('hidden');
+      } else if (waterFault) {
+        document.getElementById('waterValue').innerText = '--%';
+        document.getElementById('waterCm').innerText = 'No Echo';
+        document.getElementById('tankFill').style.height = '0%';
+        waterBadge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400';
+        waterBadge.innerText = 'Check 5V/Echo';
         tankAlert.classList.add('hidden');
       } else {
         document.getElementById('waterValue').innerText = waterVal + '%';
@@ -1634,7 +1651,7 @@
         notice.classList.remove('hidden');
         notice.className = 'text-xs text-amber-300 bg-amber-950/40 border border-amber-500/40 p-3 rounded-xl flex items-center justify-between gap-2';
         noticeText.innerHTML = '<span class="flex items-center gap-2"><span>⚠️</span> <span><strong>FORCE MODE ACTIVE:</strong> Safety mechanism is turned OFF. Dry-run cutoff and rain lockout are bypassed. Motors can be operated forcefully.</span></span>';
-      } else if (waterSensorEnabled && waterVal < 15) {
+      } else if (waterSensorEnabled && !waterFault && waterVal < 15) {
         notice.classList.remove('hidden');
         notice.className = 'text-xs text-rose-400 bg-rose-950/40 border border-rose-500/30 p-3 rounded-xl flex items-center justify-between gap-2';
         noticeText.innerHTML = '<span class="flex items-center gap-2"><span>🛑</span> <span><strong>Dry-Run Protection Active:</strong> Reservoir is below 15%. Both motors are locked to protect pumps. (Turn off safety with PIN to force run).</span></span>';
