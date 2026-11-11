@@ -48,9 +48,8 @@ const int PINS_MOTOR2[] = {18, 14, 47, 10};
 const int NUM_PINS_M2   = 4;
 
 // ==================== CALIBRATION & THRESHOLDS ====================
-const int SOIL_DRY_RAW         = 2900; // Capacitive sensor in dry air (typical 2700-3300)
-const int SOIL_WET_RAW         = 1300; // Capacitive sensor in water/wet soil (typical 1150-1450)
-const int SOIL_FAULT_LOW_RAW   = 750;  // Below this (<0.65V) = open/floating wire or unpowered sensor
+const int SOIL_DRY_RAW         = 425;  // Measured dry in air (~440-470 raw on this sensor) -> 0%
+const int SOIL_WET_RAW         = 115;  // Measured submerged in 100% water (~102-115 raw) -> 100%
 const int SOIL_DRY_THRESHOLD   = 35;   // Auto-irrigation starts when soil < 35%
 const int SOIL_WET_THRESHOLD   = 70;   // Auto-irrigation stops when soil >= 70%
 const unsigned long RAIN_LOCKOUT_MS = 86400000UL; // 24 Hours lockout
@@ -192,10 +191,10 @@ void configureAllPins() {
     gpio_set_drive_capability((gpio_num_t)pin, GPIO_DRIVE_CAP_3);
   }
 
-  // Ultrasonic Pins (Dedicated HC-SR04 with pulldown on Echo to prevent floating crosstalk)
+  // Ultrasonic Pins (Dedicated HC-SR04 - plain INPUT preserves full signal sensitivity)
   pinMode(PIN_TRIG, OUTPUT);
   digitalWrite(PIN_TRIG, LOW);
-  pinMode(PIN_ECHO, INPUT_PULLDOWN);
+  pinMode(PIN_ECHO, INPUT);
 
   // Sensors & Explicit 12-bit 11dB ADC setup
   analogReadResolution(12);
@@ -483,16 +482,10 @@ void setFertPump(bool state, const char* reason) {
 
 // ==================== HC-SR04 ULTRASONIC SENSOR ====================
 float readUltrasonicRawCm() {
-  // Ensure Echo line starts clean LOW (reject stuck-HIGH faults)
-  if (digitalRead(PIN_ECHO) == HIGH) {
-    delayMicroseconds(500);
-    if (digitalRead(PIN_ECHO) == HIGH) return -1.0f;
-  }
-
   digitalWrite(PIN_TRIG, LOW);
   delayMicroseconds(4);
   digitalWrite(PIN_TRIG, HIGH);
-  delayMicroseconds(10);
+  delayMicroseconds(20); // 20us pulse works across HC-SR04, US-015, and JSN-SR04T clones
   digitalWrite(PIN_TRIG, LOW);
 
   unsigned long duration = pulseIn(PIN_ECHO, HIGH, 30000); // 30ms timeout (~5m max)
@@ -510,8 +503,7 @@ float readUltrasonicFiltered() {
     if (r > 0.0f) vals[valid++] = r;
     if (i < 2) delay(60); // Required >=50ms acoustic decay between HC-SR04 pings
   }
-  if (valid == 0) return -1.0f;
-  if (valid == 1) return vals[0];
+  if (valid < 2) return -1.0f; // Require >=2 agreeing reflections to prevent floating glitches
   if (valid == 2) return (vals[0] + vals[1]) / 2.0f;
   // Median of 3 valid readings to suppress single spikes
   if (vals[0] > vals[1]) { float t = vals[0]; vals[0] = vals[1]; vals[1] = t; }
@@ -522,38 +514,21 @@ float readUltrasonicFiltered() {
 
 // ==================== SENSOR READING ====================
 void readSensors() {
-  // 1. Capacitive Soil Moisture (Median-trimmed multi-sample + open-wire/unpowered fault check)
+  // 1. Capacitive Soil Moisture (16-sample trimmed mean calibrated to actual hardware: ~450 dry, ~110 water)
   if (soilSensorEnabled) {
     int sum = 0, minV = 4096, maxV = -1;
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 16; i++) {
       int r = analogRead(PIN_SOIL_ANALOG);
       sum += r;
       if (r < minV) minV = r;
       if (r > maxV) maxV = r;
       delay(2);
     }
-    soilRaw = (sum - minV - maxV) / 6;
-
-    // Detect open/floating wire or unpowered sensor (never falsely clamp to 100%!)
-    bool pinFloating = false;
-    if (soilRaw < SOIL_FAULT_LOW_RAW) {
-      pinMode(PIN_SOIL_ANALOG, INPUT_PULLUP);
-      delay(5);
-      int puRaw = analogRead(PIN_SOIL_ANALOG);
-      pinMode(PIN_SOIL_ANALOG, INPUT_PULLDOWN);
-      delay(5);
-      int pdRaw = analogRead(PIN_SOIL_ANALOG);
-      pinMode(PIN_SOIL_ANALOG, INPUT);
-      if (puRaw > 3500 && pdRaw < 150) {
-        pinFloating = true;
-      }
-    }
-
-    if (pinFloating || soilRaw < SOIL_FAULT_LOW_RAW) {
-      soilFault = true;
+    soilRaw = (sum - minV - maxV) / 14;
+    soilFault = (soilRaw <= 5); // Only fault if hard-shorted to 0V
+    if (soilFault) {
       soilPercent = 0;
     } else {
-      soilFault = false;
       soilPercent = map(soilRaw, SOIL_DRY_RAW, SOIL_WET_RAW, 0, 100);
       soilPercent = constrain(soilPercent, 0, 100);
     }
@@ -1210,12 +1185,12 @@ void loop() {
       publishTelemetry();
     }
 
-    Serial.printf("[%s] WiFi:%s | En(S:%d,W:%d,R:%d) | Safe:%s | Soil:%d%% | Water:%d%%(%.1fcm) | Rain:%s(lock:%us) | M1:%s | M2:%s | Mode:%d | Next:%s\n",
+    Serial.printf("[%s] WiFi:%s | En(S:%d,W:%d,R:%d) | Safe:%s | Soil:%d%%(raw:%d) | Water:%d%%(%.1fcm) | Rain:%s(lock:%us) | M1:%s | M2:%s | Mode:%d | Next:%s\n",
                   currentTimeStr,
                   (WiFi.status() == WL_CONNECTED) ? "OK" : "NO",
                   soilSensorEnabled ? 1 : 0, waterSensorEnabled ? 1 : 0, rainSensorEnabled ? 1 : 0,
                   safetyOverride ? "BYPASS" : "ON",
-                  soilPercent, waterTankPercent, waterDistCm,
+                  soilPercent, soilRaw, waterTankPercent, waterDistCm,
                   instantRain ? "WET" : "DRY", rainRemainingSec,
                   pumpWaterActive ? "ON" : "OFF", pumpFertActive ? "ON" : "OFF",
                   (int)currentMode, nextRunString);
