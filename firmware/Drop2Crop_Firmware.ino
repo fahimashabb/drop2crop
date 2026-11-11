@@ -49,7 +49,7 @@ const int NUM_PINS_M2   = 4;
 
 // ==================== CALIBRATION & THRESHOLDS ====================
 const int SOIL_DRY_RAW         = 425;  // Measured dry in air (~440-470 raw on this sensor) -> 0%
-const int SOIL_WET_RAW         = 115;  // Measured submerged in 100% water (~102-115 raw) -> 100%
+const int SOIL_WET_RAW         = 180;  // Measured submerged in 100% water (~102-193 raw) -> 100%
 const int SOIL_DRY_THRESHOLD   = 35;   // Auto-irrigation starts when soil < 35%
 const int SOIL_WET_THRESHOLD   = 70;   // Auto-irrigation stops when soil >= 70%
 const unsigned long RAIN_LOCKOUT_MS = 86400000UL; // 24 Hours lockout
